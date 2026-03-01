@@ -29,8 +29,9 @@
 
 ## Screenshots
 
-> *Add your own screenshots here after deployment.*
+
 ![alt text](image.png)
+
 ![alt text](image-1.png)
 ## Architecture
 
@@ -265,3 +266,4 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
   <strong>🎭 BitMask</strong> — Because privacy is not a privilege. It's a right.
 </p>
 #
+
