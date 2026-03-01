@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Privacy Policy — BitMask</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/style.css" />
+  <link rel="stylesheet" href="/css/legal.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎭</text></svg>" />
+</head>
+<body>
+  <div class="legal-page">
+
+    <nav class="legal-nav">
+      <a href="/" class="legal-back">
+        <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+          <path d="M15 10H3m0 0l5-5M3 10l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Back to BitMask
+      </a>
+      <div class="legal-nav-links">
+        <a href="/privacy.html" class="active">Privacy Policy</a>
+        <a href="/terms.html">Terms of Service</a>
+      </div>
+    </nav>
+
+    <header class="legal-header">
+      <h1>Privacy Policy</h1>
+      <p class="legal-updated">Last updated: March 1, 2026</p>
+    </header>
+
+    <main class="legal-content">
+
+      <section>
+        <h2>1. Our Philosophy</h2>
+        <p>BitMask is built on a single principle: <strong>we don't want your data</strong>. We designed our system so that we technically <em>cannot</em> access, read, or store your messages — even if compelled to do so. Privacy is not a feature we bolted on; it is the architecture itself.</p>
+      </section>
+
+      <section>
+        <h2>2. Information We Do NOT Collect</h2>
+        <ul>
+          <li><strong>Messages &amp; Files:</strong> All messages and files are end-to-end encrypted (ECDH + AES-256-GCM). The server relays ciphertext it cannot decrypt. Messages and files are never written to disk or any persistent database.</li>
+          <li><strong>Personal Information:</strong> We do not collect names, emails, phone numbers, or any personally identifiable information. There is no account creation or login.</li>
+          <li><strong>Chat History:</strong> Messages exist only in volatile memory during transit and self-destruct according to the timer you set (5 seconds to 24 hours). Once destroyed, they are irrecoverable.</li>
+          <li><strong>Passphrases:</strong> If you use the passphrase lock feature, your passphrase is <strong>never stored</strong>. It is used to derive an encryption key via PBKDF2 (310,000 iterations), which encrypts your identity locally. Only the encrypted blob is saved in your browser.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>3. Information Stored in Your Browser</h2>
+        <p>BitMask offers optional identity persistence features that store data <strong>only in your own browser</strong> — never on our servers:</p>
+        <table class="legal-table">
+          <thead>
+            <tr>
+              <th>Data</th>
+              <th>Storage</th>
+              <th>When</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Peer ID + encryption keys</td>
+              <td><code>sessionStorage</code> (default)</td>
+              <td>Always — erased when you close the tab</td>
+            </tr>
+            <tr>
+              <td>Peer ID + encryption keys</td>
+              <td><code>localStorage</code></td>
+              <td>Only if you enable "Remember Identity" — persists across sessions until you clear it</td>
+            </tr>
+            <tr>
+              <td>Encrypted identity blob</td>
+              <td><code>localStorage</code></td>
+              <td>Only if you set a passphrase lock — contains your identity encrypted with your passphrase</td>
+            </tr>
+            <tr>
+              <td>Sound preference</td>
+              <td><code>localStorage</code></td>
+              <td>If you toggle sounds on/off — stores a single boolean</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>You can clear all browser-stored data at any time by clicking "New ID" or clearing your browser's site data. We have <strong>no access</strong> to anything stored in your browser.</p>
+      </section>
+
+      <section>
+        <h2>4. Information Temporarily Held in Server Memory</h2>
+        <p>While you are actively connected, the server holds the following <strong>in volatile RAM only</strong> (never persisted to disk):</p>
+        <table class="legal-table">
+          <thead>
+            <tr>
+              <th>Data</th>
+              <th>Purpose</th>
+              <th>Lifetime</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Peer ID → Socket mapping</td>
+              <td>Route messages between peers</td>
+              <td>Until you disconnect or close the tab</td>
+            </tr>
+            <tr>
+              <td>Your public encryption key</td>
+              <td>Shared with peers for key exchange</td>
+              <td>Until you disconnect</td>
+            </tr>
+            <tr>
+              <td>Room ID + Room Code</td>
+              <td>Link peers in a conversation (1:1 or group room up to 20 members)</td>
+              <td>Until all peers disconnect or leave</td>
+            </tr>
+            <tr>
+              <td>Room membership list</td>
+              <td>Track which peers are in a group room for message routing</td>
+              <td>Until the peer leaves or disconnects</td>
+            </tr>
+            <tr>
+              <td>IP address (hashed, in memory)</td>
+              <td>Rate limiting to prevent abuse</td>
+              <td>Rolling window, then discarded</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>If the server restarts, <strong>all of this data is destroyed instantly</strong>. There is no backup, no replication, and no recovery mechanism — by design.</p>
+      </section>
+
+      <section>
+        <h2>5. End-to-End Encryption</h2>
+        <p>BitMask uses the Web Crypto API built into your browser:</p>
+        <ul>
+          <li><strong>Key Exchange (1:1):</strong> ECDH (Elliptic Curve Diffie-Hellman) on the P-256 curve — both peers derive the same shared secret independently</li>
+          <li><strong>Key Exchange (Groups):</strong> The room host generates a random AES-256 group key. When a new peer joins, the host encrypts the group key using an ECDH-derived pairwise key and sends it to the joiner. The server never sees the group key.</li>
+          <li><strong>Message Encryption:</strong> AES-256-GCM with a unique 96-bit initialization vector per message, using the pairwise key (1:1) or group key (rooms)</li>
+          <li><strong>File Encryption:</strong> Same AES-256-GCM encryption applied to file data — images, documents, and all file types are encrypted before leaving your device</li>
+          <li><strong>Identity Export:</strong> When you export your identity, it is encrypted with a passphrase-derived key (PBKDF2 + AES-256-GCM) before being saved to a file</li>
+        </ul>
+        <p>Encryption keys are generated in your browser and never leave your device. The server only sees opaque ciphertext blobs. We have <strong>zero knowledge</strong> of your message or file content.</p>
+      </section>
+
+      <section>
+        <h2>6. Self-Destructing Messages &amp; Files</h2>
+        <p>Every message and file has a time-to-live (TTL) set by the sender:</p>
+        <ul>
+          <li><strong>Client-side:</strong> The recipient's browser starts a countdown timer when the content is displayed. At zero, the DOM element is destroyed, blob URLs are revoked, and the plaintext is garbage-collected.</li>
+          <li><strong>Server-side:</strong> Any encrypted content queued for an offline peer is purged from memory when its TTL expires. Read-acknowledgment triggers immediate deletion of any queued copy.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>7. Identity Management</h2>
+        <p>BitMask provides several identity features — all operating entirely within your browser:</p>
+        <ul>
+          <li><strong>Remember Identity:</strong> Optionally save your Peer ID and keys to <code>localStorage</code> so they survive tab close. Disable at any time to revert to session-only storage.</li>
+          <li><strong>Passphrase Lock:</strong> Encrypt your stored identity with a passphrase. The passphrase is never saved — only the encrypted result is stored. Wrong passphrase = no access.</li>
+          <li><strong>Export/Import:</strong> Download your identity as an encrypted <code>.bitmask</code> file. Import it on any device. The export file can be optionally passphrase-protected.</li>
+          <li><strong>QR Code:</strong> Generate a QR code of your Peer ID for easy sharing. The QR is generated locally — no data is sent to any server.</li>
+        </ul>
+        <p>None of these features send any identity data to our server beyond the Peer ID and public key needed for routing.</p>
+      </section>
+
+      <section>
+        <h2>8. Group Rooms</h2>
+        <p>BitMask supports encrypted group rooms for 3–20 peers:</p>
+        <ul>
+          <li><strong>Room Codes:</strong> When a room is created, a random 6-character alphanumeric code is generated. This code is used by others to join. Room codes exist only in server RAM and are deleted when the room empties.</li>
+          <li><strong>Group Encryption:</strong> The room host generates a random AES-256 group key in-browser. This key is distributed to each joining member encrypted via an ECDH pairwise channel. The server <strong>never sees</strong> the group key — it only relays the encrypted blobs.</li>
+          <li><strong>Membership:</strong> The server tracks which Peer IDs are in a room (in volatile RAM) to route messages. This membership data vanishes when the room empties or the server restarts.</li>
+          <li><strong>Host Transfer:</strong> If the room host disconnects, host privileges automatically transfer to the next member. This is purely a routing role — the host has no special access to message content.</li>
+        </ul>
+        <p>All group messages and files are encrypted with the shared group key before leaving your device. The server is a relay and cannot decrypt any group content.</p>
+      </section>
+
+      <section>
+        <h2>9. Cookies &amp; Tracking</h2>
+        <p>BitMask uses <strong>zero cookies</strong>, zero analytics trackers, zero advertising pixels, and zero third-party scripts. We do not use Google Analytics, Facebook Pixel, or any similar service.</p>
+        <p>Browser storage (<code>sessionStorage</code> and <code>localStorage</code>) is used only for your identity data and preferences — never for tracking.</p>
+      </section>
+
+      <section>
+        <h2>10. Third-Party Services</h2>
+        <p>The only external resources loaded are Google Fonts (Inter and JetBrains Mono) for typography. Google's font service may log standard web request data (IP address, user agent) under their own privacy policy. No other third-party services are used. The QR code generator is fully self-contained with no external dependencies.</p>
+      </section>
+
+      <section>
+        <h2>11. Data Requests &amp; Law Enforcement</h2>
+        <p>Because we do not store messages, files, user identities, or chat metadata on disk, we have <strong>nothing to provide</strong> in response to data requests, subpoenas, or legal orders. You cannot hand over what you don't have.</p>
+      </section>
+
+      <section>
+        <h2>12. Children's Privacy</h2>
+        <p>BitMask is not directed at anyone under the age of 13. We do not knowingly collect data from children. Since we collect no personal information from any user, this risk is inherently mitigated by our architecture.</p>
+      </section>
+
+      <section>
+        <h2>13. Changes to This Policy</h2>
+        <p>We may update this Privacy Policy from time to time. Changes will be reflected by the "Last updated" date at the top of this page. Since we have no way to contact you (we don't have your email), we encourage you to review this page periodically.</p>
+      </section>
+
+      <section>
+        <h2>14. Contact</h2>
+        <p>If you have questions about this Privacy Policy, you can open an issue on our <a href="https://github.com/Esca-Byte/BitMask" style="color: var(--accent);">GitHub repository</a>.</p>
+      </section>
+
+    </main>
+
+    <footer class="legal-footer">
+      <p>&copy; 2026 BitMask. No data was collected in the making of this page.</p>
+    </footer>
+  </div>
+</body>
+</html>
