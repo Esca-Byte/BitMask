@@ -874,21 +874,34 @@ input[type="text"]:focus, input[type="password"]:focus {
 
 .message.outgoing {
   align-self: flex-end;
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.92), rgba(217, 70, 239, 0.88));
-  color: white;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(99, 102, 241, 0.22);
+  color: #F8FAFC;
+  border: 1px solid rgba(129, 140, 248, 0.35);
   border-radius: var(--radius) var(--radius) 3px var(--radius);
-  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.28);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  transition: var(--transition);
+}
+
+.message.outgoing:hover {
+  background: rgba(99, 102, 241, 0.28);
+  border-color: rgba(129, 140, 248, 0.45);
 }
 
 .message.incoming {
   align-self: flex-start;
-  background: rgba(18, 18, 30, 0.88);
-  border: 1px solid var(--border-light);
-  border-left: 3px solid var(--cyan);
-  color: var(--text-primary);
+  background: rgba(30, 30, 48, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #F1F5F9;
   border-radius: var(--radius) var(--radius) var(--radius) 3px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  transition: var(--transition);
+}
+
+.message.incoming:hover {
+  background: rgba(36, 36, 56, 0.85);
+  border-color: rgba(255, 255, 255, 0.12);
 }
 
 .message.system {
@@ -901,6 +914,63 @@ input[type="text"]:focus, input[type="password"]:focus {
   font-weight: 500;
   padding: 4px 14px;
   max-width: 90%;
+}
+
+/* ── Initial Session Banner Placeholder ─────────────────────── */
+.initial-session-banner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 24px 20px;
+  margin: auto;
+  background: rgba(18, 18, 30, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius);
+  backdrop-filter: blur(12px);
+  max-width: 380px;
+  animation: messageIn 0.3s ease forwards;
+}
+
+.session-banner-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(108, 99, 255, 0.12);
+  border: 1px solid rgba(108, 99, 255, 0.25);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.session-banner-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+
+.session-banner-sub {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.session-banner-sub code {
+  font-family: var(--font-mono);
+  color: var(--accent);
+  background: rgba(108, 99, 255, 0.15);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-weight: 700;
+}
+
+.ttl-tag {
+  color: var(--pink);
+  font-weight: 700;
 }
 
 .message-content {
@@ -1741,4 +1811,80 @@ input[type="text"]:focus, input[type="password"]:focus {
   border-radius: var(--radius-sm);
   filter: drop-shadow(0 0 12px rgba(0, 242, 254, 0.45));
   background: transparent;
+}
+
+/* ── Panic Button ──────────────────────────────────────────── */
+.btn-panic {
+  color: #F87171 !important;
+  border-color: rgba(248, 113, 113, 0.25) !important;
+  transition: all 0.2s ease;
+}
+
+.btn-panic:hover {
+  background: rgba(239, 68, 68, 0.18) !important;
+  border-color: rgba(239, 68, 68, 0.45) !important;
+  color: #EF4444 !important;
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.3);
+}
+
+/* ── View-Once Mode & Tile ─────────────────────────────────── */
+.btn-icon.active {
+  color: var(--cyan) !important;
+  border-color: var(--cyan) !important;
+  background: rgba(0, 242, 254, 0.12) !important;
+  box-shadow: 0 0 8px rgba(0, 242, 254, 0.25);
+}
+
+.view-once-tile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px dashed rgba(255, 255, 255, 0.2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.view-once-tile:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--accent);
+}
+
+.view-once-tile-icon {
+  font-size: 1.2rem;
+}
+
+.view-once-tile-text {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.view-once-modal-content {
+  max-width: 480px;
+  text-align: center;
+}
+
+.view-once-media-container img, .view-once-media-container video {
+  max-width: 100%;
+  max-height: 380px;
+  border-radius: var(--radius-sm);
+  margin: 12px 0;
+  object-fit: contain;
+}
+
+.view-once-warn {
+  font-size: 0.75rem;
+  color: #F87171;
+  margin-top: 8px;
+}
+
+/* ── Stealth Blur Filter (Focus loss protection) ───────────── */
+.messages-container.stealth-blur {
+  filter: blur(24px) grayscale(0.5);
+  pointer-events: none;
+  user-select: none;
+  transition: filter 0.3s cubic-bezier(0.25, 1, 0.5, 1);
 }

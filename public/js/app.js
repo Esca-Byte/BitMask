@@ -23,6 +23,9 @@ const BitMaskApp = (() => {
   let groupMembers = new Map(); // peerId -> { publicKey }
   let typingPeers = new Set();  // peer IDs currently typing
 
+  // ── New Features State ─────────────────────────────────────
+  let isViewOnceActive = false;
+
   // ── DOM References ─────────────────────────────────────────
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => document.querySelectorAll(sel);
@@ -286,7 +289,8 @@ const BitMaskApp = (() => {
       if (!key) return;
       try {
         const decrypted = await BitMaskCrypto.decryptFile(key, data.cipher, data.nonce);
-        const blob = new Blob([decrypted], { type: data.metadata.mimeType });
+        const mime = data.metadata.mimeType || 'audio/webm;codecs=opus';
+        const blob = new Blob([decrypted], { type: mime });
         const url = URL.createObjectURL(blob);
         renderFileMessage(data.id, data.metadata, url, 'incoming', data.ttl, isGroupChat ? data.from : null);
         BitMaskSound.playIncoming();
@@ -564,13 +568,32 @@ const BitMaskApp = (() => {
       }
     });
 
-    // ── Copy Room Code (chat header) ──
+    // ── Copy Room Code & Invite Link (chat header) ──
     $('#copy-room-code-btn').addEventListener('click', () => {
       if (roomCode) {
-        navigator.clipboard.writeText(roomCode).then(() => {
-          showToast('Room code copied!', 'success');
+        const inviteUrl = `${window.location.origin}/#room=${roomCode}`;
+        navigator.clipboard.writeText(inviteUrl).then(() => {
+          showToast('Shareable room link copied to clipboard!', 'success');
         });
       }
+    });
+
+    // ── Panic Button ──
+    $('#panic-btn').addEventListener('click', () => {
+      if (confirm('🚨 EMERGENCY PANIC: Scrub all keys, storage, and exit immediately?')) {
+        BitMaskPanic.trigger();
+      }
+    });
+
+    // ── Stealth Blur (Focus Loss Protection) ──
+    window.addEventListener('blur', () => {
+      const container = $('#messages-container');
+      if (container) container.classList.add('stealth-blur');
+    });
+
+    window.addEventListener('focus', () => {
+      const container = $('#messages-container');
+      if (container) container.classList.remove('stealth-blur');
     });
 
     // ── View Members ──
@@ -796,6 +819,16 @@ const BitMaskApp = (() => {
       fileInput.click();
     });
 
+    // ── View Once Toggle Button ──
+    $('#view-once-btn').addEventListener('click', () => {
+      isViewOnceActive = !isViewOnceActive;
+      $('#view-once-btn').classList.toggle('active', isViewOnceActive);
+      showToast(
+        isViewOnceActive ? 'View Once Mode ON (Media destroys after 1 view)' : 'View Once Mode OFF',
+        isViewOnceActive ? 'info' : 'warning'
+      );
+    });
+
     fileInput.addEventListener('change', async () => {
       const file = fileInput.files[0];
       if (!file) return;
@@ -822,7 +855,14 @@ const BitMaskApp = (() => {
           name: file.name,
           mimeType: file.type || 'application/octet-stream',
           size: file.size,
+          viewOnce: isViewOnceActive,
         };
+
+        // Reset view once mode state
+        if (isViewOnceActive) {
+          isViewOnceActive = false;
+          $('#view-once-btn').classList.remove('active');
+        }
 
         const res = await BitMaskSocket.sendFile(currentRoomId, cipher, nonce, metadata, messageTTL);
 
@@ -861,9 +901,18 @@ const BitMaskApp = (() => {
     $('#video-call-btn').classList.remove('hidden');
 
     $('#connected-peer-id').textContent = formatPeerId(remotePeerId);
-    $('#messages-container').innerHTML = '';
-    addSystemMessage('End-to-end encrypted session established.');
-    addSystemMessage(`Messages will self-destruct after ${formatTTL(messageTTL)}.`);
+    $('#messages-container').innerHTML = `
+      <div class="initial-session-banner">
+        <div class="session-banner-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+          </svg>
+        </div>
+        <div class="session-banner-title">End-to-End Encrypted Session Established</div>
+        <div class="session-banner-sub">Messages self-destruct after <span class="ttl-tag">${formatTTL(messageTTL)}</span></div>
+      </div>
+    `;
     $('#message-input').focus();
   }
 
@@ -880,15 +929,20 @@ const BitMaskApp = (() => {
 
     $('#group-room-code').textContent = roomCode;
     updateMemberCount(groupMembers.size);
-    $('#messages-container').innerHTML = '';
-    addSystemMessage('Group room joined. End-to-end encrypted.');
-    addSystemMessage(`Room code: ${roomCode} — Share it so others can join.`);
-    addSystemMessage(`Messages will self-destruct after ${formatTTL(messageTTL)}.`);
-    if (isHost) {
-      addSystemMessage('You are the room host. Group key will be distributed automatically.');
-    } else {
-      addSystemMessage('Waiting for group encryption key from host...');
-    }
+    $('#messages-container').innerHTML = `
+      <div class="initial-session-banner">
+        <div class="session-banner-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+        </div>
+        <div class="session-banner-title">Group Room Joined (${roomCode})</div>
+        <div class="session-banner-sub">Share code <code>${roomCode}</code> to invite others · Self-destruct: <span class="ttl-tag">${formatTTL(messageTTL)}</span></div>
+      </div>
+    `;
     $('#message-input').focus();
   }
 
@@ -918,7 +972,15 @@ const BitMaskApp = (() => {
   //  MESSAGE RENDERING
   // ══════════════════════════════════════════════════════════
 
+  function clearInitialBanner() {
+    const banner = $('#messages-container .initial-session-banner');
+    if (banner) {
+      banner.remove();
+    }
+  }
+
   function renderMessage(msgId, text, type, ttl, senderPeerId) {
+    clearInitialBanner();
     const container = $('#messages-container');
     const el = document.createElement('div');
     el.className = `message ${type}`;
@@ -948,6 +1010,7 @@ const BitMaskApp = (() => {
   }
 
   function renderFileMessage(msgId, metadata, blobUrl, type, ttl, senderPeerId) {
+    clearInitialBanner();
     const container = $('#messages-container');
     const el = document.createElement('div');
     el.className = `message ${type}`;
@@ -965,58 +1028,100 @@ const BitMaskApp = (() => {
     const bubble = document.createElement('div');
     bubble.className = 'file-bubble';
 
-    // Preview for images
-    const isImage = metadata.mimeType && metadata.mimeType.startsWith('image/');
-    if (isImage) {
-      const preview = document.createElement('div');
-      preview.className = 'file-preview';
-      const img = document.createElement('img');
-      img.src = blobUrl;
-      img.alt = metadata.name;
-      img.loading = 'lazy';
-      // Click to open full-size in new tab
-      preview.addEventListener('click', () => window.open(blobUrl, '_blank'));
-      preview.appendChild(img);
-      bubble.appendChild(preview);
+    // Special handling for View Once Media
+    if (metadata.viewOnce) {
+      const tile = document.createElement('div');
+      tile.className = 'view-once-tile';
+      tile.innerHTML = `
+        <span class="view-once-tile-icon">👁️</span>
+        <span class="view-once-tile-text">Tap to View (View Once Media)</span>
+      `;
+
+      tile.addEventListener('click', () => {
+        const container = $('#view-once-media-container');
+        container.innerHTML = '';
+        let mediaEl;
+        if (metadata.mimeType && metadata.mimeType.startsWith('image/')) {
+          mediaEl = document.createElement('img');
+          mediaEl.src = blobUrl;
+        } else if (metadata.mimeType && metadata.mimeType.startsWith('video/')) {
+          mediaEl = document.createElement('video');
+          mediaEl.src = blobUrl;
+          mediaEl.controls = true;
+          mediaEl.autoplay = true;
+        } else {
+          mediaEl = document.createElement('div');
+          mediaEl.textContent = `File: ${metadata.name} (${formatFileSize(metadata.size)})`;
+        }
+        container.appendChild(mediaEl);
+        openModal('view-once-modal');
+
+        // Mark tile as destroyed
+        tile.innerHTML = '<span class="view-once-tile-text">[Media Opened & Destroyed]</span>';
+        tile.style.opacity = '0.5';
+        tile.style.pointerEvents = 'none';
+
+        const closeHandler = () => {
+          URL.revokeObjectURL(blobUrl);
+          container.innerHTML = '';
+        };
+        $('#view-once-modal .view-once-close-btn').addEventListener('click', closeHandler, { once: true });
+        $('#view-once-modal .modal-backdrop').addEventListener('click', closeHandler, { once: true });
+      });
+      bubble.appendChild(tile);
+    } 
+    // Standard File Preview & Info
+    else {
+      const isImage = metadata.mimeType && metadata.mimeType.startsWith('image/');
+      if (isImage) {
+        const preview = document.createElement('div');
+        preview.className = 'file-preview';
+        const img = document.createElement('img');
+        img.src = blobUrl;
+        img.alt = metadata.name;
+        img.loading = 'lazy';
+        preview.addEventListener('click', () => window.open(blobUrl, '_blank'));
+        preview.appendChild(img);
+        bubble.appendChild(preview);
+      }
+
+      const info = document.createElement('div');
+      info.className = 'file-info';
+
+      const icon = document.createElement('span');
+      icon.className = 'file-info-icon';
+      icon.textContent = getFileIcon(metadata.mimeType);
+
+      const details = document.createElement('div');
+      details.className = 'file-info-details';
+
+      const name = document.createElement('div');
+      name.className = 'file-info-name';
+      name.title = metadata.name;
+      name.textContent = metadata.name;
+
+      const size = document.createElement('div');
+      size.className = 'file-info-size';
+      size.textContent = formatFileSize(metadata.size);
+
+      details.appendChild(name);
+      details.appendChild(size);
+
+      const dlBtn = document.createElement('button');
+      dlBtn.className = 'file-download-btn';
+      dlBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v7m0 0L3 5.5M6 8l3-2.5M1 10h10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg> Save';
+      dlBtn.addEventListener('click', () => {
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = metadata.name;
+        a.click();
+      });
+
+      info.appendChild(icon);
+      info.appendChild(details);
+      info.appendChild(dlBtn);
+      bubble.appendChild(info);
     }
-
-    // File info row
-    const info = document.createElement('div');
-    info.className = 'file-info';
-
-    const icon = document.createElement('span');
-    icon.className = 'file-info-icon';
-    icon.textContent = getFileIcon(metadata.mimeType);
-
-    const details = document.createElement('div');
-    details.className = 'file-info-details';
-
-    const name = document.createElement('div');
-    name.className = 'file-info-name';
-    name.title = metadata.name;
-    name.textContent = metadata.name;
-
-    const size = document.createElement('div');
-    size.className = 'file-info-size';
-    size.textContent = formatFileSize(metadata.size);
-
-    details.appendChild(name);
-    details.appendChild(size);
-
-    const dlBtn = document.createElement('button');
-    dlBtn.className = 'file-download-btn';
-    dlBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v7m0 0L3 5.5M6 8l3-2.5M1 10h10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg> Save';
-    dlBtn.addEventListener('click', () => {
-      const a = document.createElement('a');
-      a.href = blobUrl;
-      a.download = metadata.name;
-      a.click();
-    });
-
-    info.appendChild(icon);
-    info.appendChild(details);
-    info.appendChild(dlBtn);
-    bubble.appendChild(info);
 
     const meta = createMessageMeta(ttl);
     el.appendChild(bubble);
@@ -1308,6 +1413,33 @@ const BitMaskApp = (() => {
       item.appendChild(avatar);
       item.appendChild(details);
       list.appendChild(item);
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  ONE-CLICK HASH INVITE LINKS (#room=CODE)
+  // ══════════════════════════════════════════════════════════
+
+  function checkUrlHash() {
+    const hash = window.location.hash;
+    if (hash.startsWith('#room=')) {
+      const code = hash.replace('#room=', '').trim();
+      if (code && code.length === 6) {
+        $('#room-code-input').value = code.toUpperCase();
+        showToast(`Auto-joining room ${code.toUpperCase()} from invite link...`, 'info');
+        setTimeout(() => {
+          $('#join-group-form').dispatchEvent(new Event('submit', { cancelable: true }));
+        }, 600);
+      }
+    } else if (hash.startsWith('#peer=')) {
+      const pid = hash.replace('#peer=', '').trim();
+      if (pid && pid.length === 16) {
+        $('#target-peer-input').value = pid.toUpperCase();
+        showToast(`Connecting to peer ${pid.toUpperCase()}...`, 'info');
+        setTimeout(() => {
+          $('#connect-form').dispatchEvent(new Event('submit', { cancelable: true }));
+        }, 600);
+      }
     }
   }
 

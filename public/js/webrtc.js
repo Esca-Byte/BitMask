@@ -155,16 +155,35 @@ class BitMaskCallController {
 
     this.roomId = roomId;
     this.targetPeerId = fromPeerId;
-    this.callType = signal.callType;
+    this.callType = signal.callType || 'voice';
 
     // Pulse incoming call sound
     this.startRingingTone();
 
-    // Render incoming call overlay details
+    // Render incoming call overlay details with exact call type (Voice Call or Video Call)
     const modal = document.getElementById('incoming-call-modal');
     const callerSpan = document.getElementById('incoming-caller-id');
-    if (modal && callerSpan) {
+    const titleEl = document.getElementById('incoming-call-title');
+    const avatarEl = document.getElementById('incoming-call-avatar');
+    const descEl = document.getElementById('incoming-call-desc');
+
+    const isVideo = this.callType === 'video';
+    const typeLabel = isVideo ? 'Video Call' : 'Voice Call';
+    const typeIcon = isVideo ? '📹' : '📞';
+
+    if (titleEl) {
+      titleEl.textContent = `Incoming ${typeLabel}...`;
+    }
+    if (avatarEl) {
+      avatarEl.textContent = typeIcon;
+    }
+    if (descEl) {
+      descEl.innerHTML = `Peer <span id="incoming-caller-id">${fromPeerId.slice(0, 6)}...</span> is requesting an encrypted <strong>${typeLabel}</strong>.`;
+    } else if (callerSpan) {
       callerSpan.textContent = fromPeerId.slice(0, 6) + '...';
+    }
+
+    if (modal) {
       modal.classList.remove('hidden');
     }
   }
