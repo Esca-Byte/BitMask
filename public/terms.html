@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Terms of Service — BitMask</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/style.css" />
+  <link rel="stylesheet" href="/css/legal.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎭</text></svg>" />
+</head>
+<body>
+  <div class="legal-page">
+
+    <nav class="legal-nav">
+      <a href="/" class="legal-back">
+        <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+          <path d="M15 10H3m0 0l5-5M3 10l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Back to BitMask
+      </a>
+      <div class="legal-nav-links">
+        <a href="/privacy.html">Privacy Policy</a>
+        <a href="/terms.html" class="active">Terms of Service</a>
+      </div>
+    </nav>
+
+    <header class="legal-header">
+      <h1>Terms of Service</h1>
+      <p class="legal-updated">Last updated: March 1, 2026</p>
+    </header>
+
+    <main class="legal-content">
+
+      <section>
+        <h2>1. Acceptance of Terms</h2>
+        <p>By accessing or using BitMask ("the Service"), you agree to be bound by these Terms of Service ("Terms"). If you do not agree to these Terms, do not use the Service. Your continued use constitutes acceptance of any future changes to these Terms.</p>
+      </section>
+
+      <section>
+        <h2>2. Description of Service</h2>
+        <p>BitMask is an anonymous, end-to-end encrypted, real-time chat platform. The Service provides:</p>
+        <ul>
+          <li>Anonymous peer-to-peer messaging with no account registration</li>
+          <li>End-to-end encryption using ECDH key exchange and AES-256-GCM</li>
+          <li>Encrypted group rooms for 3–20 peers with host-managed group key distribution</li>
+          <li>Self-destructing messages and files with configurable time-to-live (5 seconds to 24 hours)</li>
+          <li>Encrypted file and image sharing (up to 5 MB per file)</li>
+          <li>Optional persistent identity with passphrase locking and export/import</li>
+          <li>QR code generation for easy Peer ID sharing</li>
+          <li>Sound notifications for chat events</li>
+          <li>Volatile in-memory server state with no persistent data storage</li>
+        </ul>
+        <p>The Service is provided <strong>"as is"</strong> and <strong>"as available"</strong> without warranties of any kind.</p>
+      </section>
+
+      <section>
+        <h2>3. Eligibility</h2>
+        <p>You must be at least <strong>13 years of age</strong> to use this Service. If you are under 18, you should review these Terms with a parent or guardian. By using BitMask, you represent that you meet this age requirement.</p>
+      </section>
+
+      <section>
+        <h2>4. User Conduct</h2>
+        <p>While BitMask is designed to protect your privacy, it is <strong>not</strong> designed to enable illegal activity. You agree NOT to use the Service to:</p>
+        <ul>
+          <li>Transmit any content that is unlawful, threatening, abusive, harassing, defamatory, obscene, or otherwise objectionable</li>
+          <li>Distribute child sexual abuse material (CSAM) or exploit minors in any way</li>
+          <li>Engage in fraud, phishing, or social engineering attacks</li>
+          <li>Distribute malware, viruses, or other harmful code via messages or file sharing</li>
+          <li>Harass, stalk, or intimidate other users</li>
+          <li>Impersonate any person or entity</li>
+          <li>Interfere with or disrupt the Service, servers, or networks</li>
+          <li>Attempt to brute-force or enumerate active Peer IDs</li>
+          <li>Use automated scripts or bots to spam or abuse the platform</li>
+          <li>Send files containing illegal content or content you do not have the right to distribute</li>
+          <li>Violate any applicable local, state, national, or international law</li>
+        </ul>
+        <div class="legal-callout warning">
+          <strong>Important:</strong> While we cannot read your encrypted messages or files, we reserve the right to terminate connections and block IP addresses engaged in abuse patterns detectable at the network level (e.g., excessive connection rates, flood attacks, oversized payloads).
+        </div>
+      </section>
+
+      <section>
+        <h2>5. No Guarantee of Anonymity</h2>
+        <p>While BitMask is architected to maximize your privacy, <strong>we cannot guarantee absolute anonymity</strong>. Factors outside our control include:</p>
+        <ul>
+          <li>Your ISP may log that you connected to our server</li>
+          <li>Your device or browser may be compromised</li>
+          <li>The person you are chatting with may screenshot or record their screen</li>
+          <li>In group rooms, any member with the group key can decrypt group messages</li>
+          <li>Network-level surveillance may correlate traffic patterns</li>
+          <li>Exported identity files (<code>.bitmask</code>) may be intercepted if shared insecurely</li>
+        </ul>
+        <p>For stronger anonymity guarantees, consider using BitMask through the Tor network or a trusted VPN. We do not block Tor exit nodes.</p>
+      </section>
+
+      <section>
+        <h2>6. Message &amp; File Ephemerality</h2>
+        <p>Messages and files on BitMask are designed to be ephemeral:</p>
+        <ul>
+          <li>Messages and files are held in volatile server memory only during transit</li>
+          <li>All content self-destructs on the recipient's device after the sender-configured TTL</li>
+          <li>No messages or files are written to any persistent storage (disk, database, or backup) on the server</li>
+          <li>File transfers are limited to 5 MB per file</li>
+        </ul>
+        <p>However, we <strong>cannot prevent</strong> a recipient from capturing content before it self-destructs (e.g., via screenshots, screen recording, downloading files, or browser developer tools). Send sensitive information at your own risk.</p>
+      </section>
+
+      <section>
+        <h2>7. Identity Persistence &amp; Security</h2>
+        <p>BitMask offers optional identity persistence features:</p>
+        <ul>
+          <li><strong>Remember Identity:</strong> Saves your identity to browser <code>localStorage</code>. You are responsible for the security of your own device.</li>
+          <li><strong>Passphrase Lock:</strong> Encrypts your stored identity with a passphrase you choose. If you forget it, your identity is irrecoverable — we cannot reset it.</li>
+          <li><strong>Export/Import:</strong> Allows you to download and restore your identity. Exported files may optionally be passphrase-encrypted. Protect exported files as you would a private key.</li>
+        </ul>
+        <p>These features operate entirely client-side. We have no ability to recover, reset, or access your identity.</p>
+      </section>
+
+      <section>
+        <h2>8. Group Rooms</h2>
+        <p>BitMask provides encrypted group rooms. By creating or joining a group room, you acknowledge:</p>
+        <ul>
+          <li><strong>Room Codes:</strong> A 6-character room code is generated for each group. Anyone with the code can join (up to 20 members). Treat room codes like passwords — share them only with intended participants.</li>
+          <li><strong>Group Key:</strong> The room host generates and distributes an AES-256 group encryption key. All members sharing this key can decrypt group messages. If a member leaves, the current group key remains in use unless a new room is created.</li>
+          <li><strong>Host Role:</strong> The room creator is the host. If the host disconnects, host privileges transfer automatically. The host role only affects key distribution — the host cannot decrypt anything the group key doesn’t already allow.</li>
+          <li><strong>Member Visibility:</strong> All members of a group room can see the Peer IDs of other members in the room.</li>
+          <li><strong>No Key Rotation:</strong> When a member leaves, the group key is not automatically rotated. For maximum security, create a new room if a participant is compromised.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>9. Rate Limiting &amp; Abuse Prevention</h2>
+        <p>To maintain the quality and availability of the Service, we enforce rate limits:</p>
+        <ul>
+          <li>HTTP request limits per IP address (default: 100 requests per 15 minutes)</li>
+          <li>Socket event limits per connection (default: 60 events per minute for general events, 30 per minute for file transfers)</li>
+        </ul>
+        <p>Exceeding these limits will result in temporary throttling. Persistent abuse may result in connection termination.</p>
+      </section>
+
+      <section>
+        <h2>10. Intellectual Property</h2>
+        <p>BitMask is open-source software. The source code is available on <a href="https://github.com/Esca-Byte/BitMask" style="color: var(--accent);">GitHub</a> under the MIT License.</p>
+        <p>Content you transmit through the Service remains yours. Since we cannot read it, we claim no rights to it.</p>
+      </section>
+
+      <section>
+        <h2>11. Disclaimer of Warranties</h2>
+        <div class="legal-callout">
+          <p>THE SERVICE IS PROVIDED "AS IS" AND "AS AVAILABLE" WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.</p>
+          <p>WE DO NOT WARRANT THAT THE SERVICE WILL BE UNINTERRUPTED, SECURE, OR ERROR-FREE. WE DO NOT WARRANT THAT THE ENCRYPTION IMPLEMENTATION IS FREE FROM VULNERABILITIES.</p>
+        </div>
+      </section>
+
+      <section>
+        <h2>12. Limitation of Liability</h2>
+        <div class="legal-callout">
+          <p>TO THE MAXIMUM EXTENT PERMITTED BY LAW, BITMASK AND ITS OPERATORS SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, INCLUDING BUT NOT LIMITED TO LOSS OF DATA, LOSS OF PRIVACY, OR LOSS OF PROFITS, ARISING OUT OF OR IN CONNECTION WITH YOUR USE OF THE SERVICE.</p>
+          <p>OUR TOTAL LIABILITY SHALL NOT EXCEED $0.00 USD, REFLECTING THE FREE NATURE OF THE SERVICE AND OUR ZERO-KNOWLEDGE ARCHITECTURE.</p>
+        </div>
+      </section>
+
+      <section>
+        <h2>13. Indemnification</h2>
+        <p>You agree to indemnify and hold harmless BitMask and its operators from any claims, damages, losses, or expenses (including reasonable attorney fees) arising from your use of the Service or your violation of these Terms.</p>
+      </section>
+
+      <section>
+        <h2>14. Service Availability</h2>
+        <p>We make no guarantees about the uptime or availability of the Service. We may suspend, modify, or discontinue the Service at any time without notice. Because the server stores no persistent data, there is nothing to migrate. Your identity can be preserved using the Export feature.</p>
+      </section>
+
+      <section>
+        <h2>15. Modifications to Terms</h2>
+        <p>We reserve the right to modify these Terms at any time. Changes take effect immediately upon being posted to this page. The "Last updated" date at the top reflects the most recent revision. Your continued use of the Service after changes are posted constitutes your acceptance of the revised Terms.</p>
+      </section>
+
+      <section>
+        <h2>16. Severability</h2>
+        <p>If any provision of these Terms is found to be unenforceable or invalid, that provision shall be limited or eliminated to the minimum extent necessary, and the remaining provisions shall remain in full force and effect.</p>
+      </section>
+
+      <section>
+        <h2>17. Governing Law</h2>
+        <p>These Terms shall be governed by and construed in accordance with applicable laws, without regard to conflict of law principles.</p>
+      </section>
+
+      <section>
+        <h2>18. Contact</h2>
+        <p>For questions about these Terms, you can open an issue on our <a href="https://github.com/Esca-Byte/BitMask" style="color: var(--accent);">GitHub repository</a>.</p>
+      </section>
+
+    </main>
+
+    <footer class="legal-footer">
+      <p>&copy; 2026 BitMask. No data was collected in the making of this page.</p>
+    </footer>
+  </div>
+</body>
+</html>
