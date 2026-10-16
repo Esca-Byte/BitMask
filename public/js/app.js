@@ -450,30 +450,6 @@ const BitMaskApp = (() => {
       openQrScanner();
     });
 
-    $('#qr-camera-btn').addEventListener('click', () => {
-      openQrScanner();
-    });
-
-    $('#qr-image-btn').addEventListener('click', () => {
-      $('#qr-image-input').click();
-    });
-
-    $('#qr-image-input').addEventListener('change', async () => {
-      const file = $('#qr-image-input').files[0];
-      $('#qr-image-input').value = '';
-      if (!qrDetector) {
-        try {
-          const formats = await BarcodeDetector.getSupportedFormats();
-          if (!formats.includes('qr_code')) throw new Error('QR support unavailable');
-          qrDetector = new BarcodeDetector({ formats: ['qr_code'] });
-        } catch {
-          $('#qr-scanner-status').textContent = 'Image scanning is unavailable in this browser. Enter the code manually.';
-          return;
-        }
-      }
-      await scanQrImage(file);
-    });
-
     // ── Sound Toggle ──
     $('#sound-toggle-btn').addEventListener('click', () => {
       const enabled = BitMaskSound.isEnabled();
@@ -1835,7 +1811,7 @@ const BitMaskApp = (() => {
     if (placeholder) placeholder.classList.remove('hidden');
 
     if (typeof window.BarcodeDetector !== 'function') {
-      if (status) status.textContent = 'Camera scanning is unavailable here. Try Scan image or enter the code manually.';
+      if (status) status.textContent = 'Camera scanning is unavailable in this browser.';
       return;
     }
 
@@ -1846,8 +1822,8 @@ const BitMaskApp = (() => {
       await startQrCamera();
     } catch (err) {
       if (status) status.textContent = err.name === 'NotAllowedError'
-        ? 'Camera permission was not granted. Use Scan image or allow camera access.'
-        : 'Camera scanner is unavailable. Use Scan image or enter the code manually.';
+        ? 'Camera permission was not granted. Close this view and try again.'
+        : 'Camera scanner is unavailable in this browser.';
       console.info('[BitMask] QR camera unavailable:', err.message);
     }
   }

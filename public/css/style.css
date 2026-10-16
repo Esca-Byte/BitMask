@@ -2631,10 +2631,10 @@ textarea:focus-visible,
   position: absolute;
   width: 170px;
   height: 170px;
-  border: 2px solid transparent;
+  border: 2px solid rgba(150, 160, 255, 0.9);
   border-radius: 14px;
-  background: linear-gradient(#050a12, #050a12) padding-box,
-    linear-gradient(135deg, var(--cyan), var(--accent), var(--pink)) border-box;
+  background: transparent;
+  box-shadow: 0 0 0 1px rgba(99, 217, 232, 0.2), 0 0 22px rgba(99, 217, 232, 0.18);
   opacity: 0.9;
   pointer-events: none;
 }
@@ -2912,5 +2912,128 @@ textarea:focus-visible,
 
   .qr-scanner-actions {
     flex-direction: column;
+  }
+}
+
+/* ── True mobile layout ──────────────────────────────────────
+   Some mobile browsers report a wide CSS viewport while rendering a
+   narrow device. The pointer-coarse branch keeps the layout single-column
+   in that case instead of squeezing the desktop grid into a phone. */
+@media (max-width: 1100px), (pointer: coarse) {
+  .landing-wrapper {
+    display: flex !important;
+    width: 100%;
+    max-width: 640px;
+    flex-direction: column;
+    gap: 14px;
+    padding: 22px 14px 30px;
+  }
+
+  .landing-header {
+    padding: 4px 2px 10px;
+    text-align: center;
+  }
+
+  .landing-header .logo {
+    justify-content: center;
+  }
+
+  .landing-header .logo h1 {
+    font-size: clamp(2rem, 9vw, 2.7rem);
+  }
+
+  .landing-intro {
+    margin-inline: auto;
+    font-size: 0.9rem;
+    line-height: 1.55;
+  }
+
+  .identity-card,
+  .connect-section,
+  .group-section {
+    width: 100%;
+    padding: 18px;
+  }
+
+  .card-header {
+    align-items: flex-start;
+  }
+
+  .card-actions {
+    flex-shrink: 0;
+  }
+
+  .identity-buttons {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .identity-buttons .btn {
+    min-width: 0;
+    padding-inline: 6px;
+    font-size: 0.72rem;
+  }
+
+  .connect-input-group {
+    flex-wrap: wrap;
+  }
+
+  .connect-input-group > input {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+
+  .connect-actions {
+    width: 100%;
+  }
+
+  .connect-actions .btn {
+    flex: 1;
+  }
+
+  .group-actions .input-group {
+    flex-direction: row;
+  }
+
+  .group-actions .input-group input {
+    min-width: 0;
+  }
+
+  .features {
+    display: grid;
+    grid-template-columns: 1fr !important;
+    gap: 10px;
+  }
+
+  .feature {
+    min-height: 0;
+    padding: 16px;
+  }
+
+  .landing-footer {
+    padding-top: 14px;
+  }
+
+  .qr-scanner-modal-content {
+    width: min(94vw, 460px);
+    max-width: 460px;
+    padding: 16px;
+  }
+
+  .qr-scanner-frame {
+    min-height: min(68vh, 430px);
+  }
+
+  #qr-scanner-video {
+    min-height: min(68vh, 430px);
+  }
+
+  .qr-scanner-corners {
+    width: min(58vw, 220px);
+    height: min(58vw, 220px);
+  }
+
+  .qr-scanner-actions {
+    display: none;
   }
 }
