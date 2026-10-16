@@ -7,7 +7,17 @@ const BitMaskSocket = (() => {
   let handlers = {};
 
   function connect() {
-    socket = io({ transports: ['websocket', 'polling'] });
+    if (socket?.connected || socket?.active) return;
+
+    const serverUrl = window.BitMaskConfig?.serverUrl || (
+      window.BitMaskConfig?.isNative ? '' : window.location.origin
+    );
+    if (!serverUrl) {
+      handlers.onError?.('Mobile relay URL is not configured. Set BITMASK_SERVER_URL before building the APK.');
+      return;
+    }
+
+    socket = io(serverUrl, { transports: ['websocket', 'polling'] });
 
     socket.on('connect', () => {
       console.log('[BitMask] Connected to server');
@@ -54,6 +64,18 @@ const BitMaskSocket = (() => {
 
     socket.on('file', (data) => {
       handlers.onFile?.(data);
+    });
+
+    socket.on('file-start', (data) => {
+      handlers.onFileStart?.(data);
+    });
+
+    socket.on('file-chunk', (data) => {
+      handlers.onFileChunk?.(data);
+    });
+
+    socket.on('file-complete', (data) => {
+      handlers.onFileComplete?.(data);
     });
 
     socket.on('call-signal', (data) => {
@@ -134,6 +156,14 @@ const BitMaskSocket = (() => {
     if (socket) socket.emit('leave-room', { roomId });
   }
 
+  function disconnect() {
+    if (!socket) return;
+    socket.removeAllListeners();
+    socket.disconnect();
+    socket = null;
+    handlers = {};
+  }
+
   function ackMessage(msgId) {
     if (socket) socket.emit('message-ack', { msgId });
   }
@@ -144,6 +174,48 @@ const BitMaskSocket = (() => {
       socket.emit('send-file', { roomId, cipher, nonce, metadata, ttl }, (res) => {
         if (res?.error) reject(new Error(res.error));
         else resolve(res);
+      });
+    });
+  }
+
+  function startFile(roomId, metadata, ttl, chunkCount) {
+    return new Promise((resolve, reject) => {
+      if (!socket) return reject(new Error('Not connected'));
+      socket.emit('send-file-start', { roomId, metadata, ttl, chunkCount }, (res) => {
+        if (res?.error) reject(new Error(res.error));
+        else resolve(res);
+      });
+    });
+  }
+
+  function sendFileChunk(roomId, msgId, index, cipher, nonce) {
+    return new Promise((resolve, reject) => {
+      if (!socket) return reject(new Error('Not connected'));
+      socket.emit('send-file-chunk', { roomId, msgId, index, cipher, nonce }, (res) => {
+        if (res?.error) reject(new Error(res.error));
+        else resolve(res);
+      });
+    });
+  }
+
+  function completeFile(roomId, msgId) {
+    return new Promise((resolve, reject) => {
+      if (!socket) return reject(new Error('Not connected'));
+      socket.emit('send-file-complete', { roomId, msgId }, (res) => {
+        if (res?.error) reject(new Error(res.error));
+        else resolve(res);
+      });
+    });
+  }
+
+  function measureLatency() {
+    return new Promise((resolve, reject) => {
+      if (!socket?.connected) return reject(new Error('Not connected'));
+      const startedAt = performance.now();
+      const timeout = setTimeout(() => reject(new Error('Latency check timed out')), 4000);
+      socket.emit('connection-ping', null, () => {
+        clearTimeout(timeout);
+        resolve(Math.round(performance.now() - startedAt));
       });
     });
   }
@@ -169,11 +241,16 @@ const BitMaskSocket = (() => {
     distributeKey,
     sendMessage,
     sendFile,
+    startFile,
+    sendFileChunk,
+    completeFile,
     sendTyping,
     sendCallSignal,
     leaveRoom,
+    disconnect,
     ackMessage,
     on,
     isConnected,
+    measureLatency,
   };
 })();
