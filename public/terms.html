@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/css/style.css" />
   <link rel="stylesheet" href="/css/legal.css" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎭</text></svg>" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='24' fill='%237785ff'/%3E%3Ccircle cx='34' cy='44' r='8' fill='white'/%3E%3Ccircle cx='66' cy='44' r='8' fill='white'/%3E%3Cpath d='M25 63c15 14 35 14 50 0' fill='none' stroke='white' stroke-width='7' stroke-linecap='round'/%3E%3C/svg%3E" />
 </head>
 <body>
   <div class="legal-page">
@@ -47,7 +47,7 @@
           <li>End-to-end encryption using ECDH key exchange and AES-256-GCM</li>
           <li>Encrypted group rooms for 3–20 peers with host-managed group key distribution</li>
           <li>Self-destructing messages and files with configurable time-to-live (5 seconds to 24 hours)</li>
-          <li>Encrypted file and image sharing (up to 5 MB per file)</li>
+          <li>Encrypted file and image sharing (up to 25 MB per file, relayed in encrypted chunks)</li>
           <li>Optional persistent identity with passphrase locking and export/import</li>
           <li>QR code generation for easy Peer ID sharing</li>
           <li>Sound notifications for chat events</li>
@@ -103,7 +103,7 @@
           <li>Messages and files are held in volatile server memory only during transit</li>
           <li>All content self-destructs on the recipient's device after the sender-configured TTL</li>
           <li>No messages or files are written to any persistent storage (disk, database, or backup) on the server</li>
-          <li>File transfers are limited to 5 MB per file</li>
+          <li>File transfers are limited to 25 MB per file and are sent as encrypted chunks</li>
         </ul>
         <p>However, we <strong>cannot prevent</strong> a recipient from capturing content before it self-destructs (e.g., via screenshots, screen recording, downloading files, or browser developer tools). Send sensitive information at your own risk.</p>
       </section>
