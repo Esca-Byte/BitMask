@@ -170,6 +170,45 @@ const BitMaskCrypto = (() => {
     );
   }
 
+  /**
+   * Encrypt a file as independently authenticated chunks. Each chunk gets a
+   * fresh nonce, so large media never has to cross the Socket.io frame limit.
+   */
+  async function encryptFileChunks(sharedKey, fileBuffer, chunkSize = 512 * 1024, onProgress) {
+    const source = new Uint8Array(fileBuffer);
+    const chunks = [];
+    const total = Math.max(1, Math.ceil(source.byteLength / chunkSize));
+
+    for (let offset = 0, index = 0; offset < source.byteLength || (source.byteLength === 0 && index === 0); offset += chunkSize, index++) {
+      const chunk = source.slice(offset, Math.min(offset + chunkSize, source.byteLength));
+      const encrypted = await encryptFile(sharedKey, chunk.buffer);
+      chunks.push(encrypted);
+      onProgress?.(index + 1, total);
+      if (source.byteLength === 0) break;
+    }
+
+    return chunks;
+  }
+
+  /** Decrypt and join independently authenticated file chunks in order. */
+  async function decryptFileChunks(sharedKey, chunks, onProgress) {
+    const buffers = [];
+    for (let index = 0; index < chunks.length; index++) {
+      const buffer = await decryptFile(sharedKey, chunks[index].cipher, chunks[index].nonce);
+      buffers.push(new Uint8Array(buffer));
+      onProgress?.(index + 1, chunks.length);
+    }
+
+    const totalLength = buffers.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+    const joined = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const buffer of buffers) {
+      joined.set(buffer, offset);
+      offset += buffer.byteLength;
+    }
+    return joined.buffer;
+  }
+
   // ── Utility ────────────────────────────────────────────────
 
   function bufferToBase64(buffer) {
@@ -201,6 +240,8 @@ const BitMaskCrypto = (() => {
     decrypt,
     encryptFile,
     decryptFile,
+    encryptFileChunks,
+    decryptFileChunks,
     generateGroupKey,
     exportRawKey,
     importRawKey,
