@@ -284,27 +284,14 @@
   <!-- ── QR Scanner Modal ──────────────────────────────────── -->
   <div id="qr-scanner-modal" class="modal qr-scanner-modal hidden" aria-hidden="true">
     <div class="modal-backdrop"></div>
-    <div class="modal-content qr-scanner-modal-content" role="dialog" aria-modal="true" aria-labelledby="qr-scanner-title">
-      <div class="modal-header qr-scanner-header">
-        <div>
-          <span class="modal-kicker">Mobile connection</span>
-          <h3 id="qr-scanner-title">Scan a QR code</h3>
-        </div>
-        <button class="modal-close-btn" type="button" aria-label="Close QR scanner">&times;</button>
-      </div>
+    <div class="modal-content qr-scanner-modal-content" role="dialog" aria-modal="true" aria-label="QR scanner">
       <div class="qr-scanner-frame">
         <video id="qr-scanner-video" playsinline muted aria-label="QR scanner camera preview"></video>
-        <div class="qr-scanner-placeholder" id="qr-scanner-placeholder">
-          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><path d="M8 8h3v3H8zM13 13h3v3h-3z"/></svg>
-          <strong>Camera preview</strong>
-          <span>Allow camera access to scan a peer or room code.</span>
-        </div>
+        <div class="qr-scanner-placeholder" id="qr-scanner-placeholder" aria-hidden="true"></div>
         <div class="qr-scanner-corners" aria-hidden="true"></div>
       </div>
-      <div class="qr-scanner-footer">
-        <p id="qr-scanner-status" class="qr-scanner-status" role="status">Starting scanner…</p>
-        <p class="qr-scanner-hint">Scanning starts automatically. A valid peer or room code connects immediately.</p>
-      </div>
+      <button class="modal-close-btn qr-scanner-exit" type="button" aria-label="Exit QR scanner">&times;</button>
+      <p id="qr-scanner-status" class="qr-scanner-status" role="status">Starting scanner…</p>
     </div>
   </div>
 
