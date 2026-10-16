@@ -14,6 +14,17 @@ const BitMaskApp = (() => {
   let typingTimeout = null;
   let isTypingSent = false;
   let messageTimers = new Map(); // msgId -> timer
+  let messageRegistry = new Map(); // msgId -> { element, text, type }
+  let mediaUrls = new Map(); // msgId -> local blob URL
+  let activeViewOnceCleanup = null;
+  let activeViewOnceMsgId = null;
+  let incomingFileTransfers = new Map();
+  let replyTarget = null;
+  let qualityInterval = null;
+  let qrScannerStream = null;
+  let qrScannerFrame = null;
+  let qrDetector = null;
+  let qrScanBusy = false;
 
   // ── Group State ────────────────────────────────────────────
   let isGroupChat = false;
@@ -70,6 +81,7 @@ const BitMaskApp = (() => {
 
     // Show landing
     showView('landing-view');
+    registerServiceWorker();
   }
 
   async function generateNewIdentity(reRegister = true) {
@@ -89,6 +101,14 @@ const BitMaskApp = (() => {
         showToast(err.message, 'error');
       }
     }
+  }
+
+  function registerServiceWorker() {
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.register('/sw.js').catch((err) => {
+      // Offline caching is an enhancement; never block the chat if it is unavailable.
+      console.info('[BitMask] Offline cache unavailable:', err.message);
+    });
   }
 
   function updatePeerIdDisplay() {
@@ -131,6 +151,7 @@ const BitMaskApp = (() => {
         setupFileHandlers();
         BitMaskSocket.connect();
         showView('landing-view');
+        registerServiceWorker();
         showToast('Identity unlocked!', 'success');
         BitMaskSound.playConnect();
       } catch (err) {
@@ -154,6 +175,7 @@ const BitMaskApp = (() => {
       setupFileHandlers();
       BitMaskSocket.connect();
       showView('landing-view');
+      registerServiceWorker();
       showToast('Started with a fresh identity.', 'info');
     });
   }
@@ -165,6 +187,8 @@ const BitMaskApp = (() => {
   function setupSocketHandlers() {
     BitMaskSocket.on('onConnect', async () => {
       updateStatus('online');
+      updateChatSessionStatus('online');
+      startQualityMonitor();
       try {
         await BitMaskSocket.register(peerId, publicKeyBase64);
         showToast('Identity secured. You are online.', 'success');
@@ -175,6 +199,9 @@ const BitMaskApp = (() => {
 
     BitMaskSocket.on('onDisconnect', () => {
       updateStatus('offline');
+      updateChatSessionStatus('offline');
+      stopQualityMonitor();
+      window.BitMaskCall?.handleTransportDisconnect();
       BitMaskSound.playDisconnect();
       showToast('Connection lost. Reconnecting...', 'warning');
     });
@@ -198,6 +225,7 @@ const BitMaskApp = (() => {
     // ── 1:1 Peer Disconnected ──
     BitMaskSocket.on('onPeerDisconnected', () => {
       if (isGroupChat) return; // groups use peer-left
+      window.BitMaskCall?.hangup(false);
       addSystemMessage('Peer disconnected. Messages self-destructing...');
       BitMaskSound.playDisconnect();
       destroyAllMessages();
@@ -275,11 +303,65 @@ const BitMaskApp = (() => {
       try {
         const plaintext = await BitMaskCrypto.decrypt(key, msg.cipher, msg.nonce);
         BitMaskSocket.ackMessage(msg.id);
-        renderMessage(msg.id, plaintext, 'incoming', msg.ttl, isGroupChat ? msg.from : null);
-        BitMaskSound.playIncoming();
+        const payload = decodeMessagePayload(plaintext);
+        if (payload.kind === 'reaction') {
+          applyReaction(payload.targetId, payload.label, msg.ttl);
+        } else {
+          renderMessage(msg.id, payload.text, 'incoming', msg.ttl, isGroupChat ? msg.from : null, payload.replyTo);
+          BitMaskSound.playIncoming();
+        }
       } catch (err) {
         console.error('Decryption failed:', err);
         renderMessage(msg.id, '[Decryption failed]', 'incoming error', msg.ttl, isGroupChat ? msg.from : null);
+      }
+    });
+
+    BitMaskSocket.on('onFileStart', (data) => {
+      const metadata = normalizeFileMetadata(data.metadata);
+      const chunkCount = Number(data.chunkCount);
+      if (!Number.isInteger(chunkCount) || chunkCount < 1 || chunkCount > 128) return;
+      const timeoutId = setTimeout(() => incomingFileTransfers.delete(data.id), Math.max(5000, Number(data.ttl) || messageTTL));
+      incomingFileTransfers.set(data.id, {
+        metadata,
+        ttl: data.ttl,
+        from: data.from,
+        chunkCount,
+        chunks: new Array(chunkCount),
+        received: 0,
+        timeoutId,
+      });
+    });
+
+    BitMaskSocket.on('onFileChunk', (data) => {
+      const transfer = incomingFileTransfers.get(data.id);
+      if (!transfer || !Number.isInteger(Number(data.index))) return;
+      const index = Number(data.index);
+      if (index < 0 || index >= transfer.chunkCount || transfer.chunks[index]) return;
+      transfer.chunks[index] = { cipher: data.cipher, nonce: data.nonce };
+      transfer.received += 1;
+    });
+
+    BitMaskSocket.on('onFileComplete', async (data) => {
+      const transfer = incomingFileTransfers.get(data.id);
+      if (!transfer) return;
+      clearTimeout(transfer.timeoutId);
+      incomingFileTransfers.delete(data.id);
+
+      const key = isGroupChat ? groupKey : sharedKey;
+      if (!key || transfer.received !== transfer.chunkCount || transfer.chunks.some(chunk => !chunk)) {
+        addSystemMessage('Encrypted media arrived incomplete and was discarded.');
+        return;
+      }
+
+      try {
+        const decrypted = await BitMaskCrypto.decryptFileChunks(key, transfer.chunks);
+        const blob = new Blob([decrypted], { type: transfer.metadata.mimeType });
+        const url = URL.createObjectURL(blob);
+        renderFileMessage(data.id, transfer.metadata, url, 'incoming', transfer.ttl, isGroupChat ? transfer.from : null);
+        BitMaskSound.playIncoming();
+      } catch (err) {
+        console.error('Chunked file decryption failed:', err);
+        addSystemMessage('Failed to decrypt incoming media.');
       }
     });
 
@@ -289,10 +371,11 @@ const BitMaskApp = (() => {
       if (!key) return;
       try {
         const decrypted = await BitMaskCrypto.decryptFile(key, data.cipher, data.nonce);
-        const mime = data.metadata.mimeType || 'audio/webm;codecs=opus';
+        const metadata = normalizeFileMetadata(data.metadata);
+        const mime = metadata.mimeType || 'application/octet-stream';
         const blob = new Blob([decrypted], { type: mime });
         const url = URL.createObjectURL(blob);
-        renderFileMessage(data.id, data.metadata, url, 'incoming', data.ttl, isGroupChat ? data.from : null);
+        renderFileMessage(data.id, metadata, url, 'incoming', data.ttl, isGroupChat ? data.from : null);
         BitMaskSound.playIncoming();
       } catch (err) {
         console.error('File decryption failed:', err);
@@ -360,6 +443,35 @@ const BitMaskApp = (() => {
         btn.textContent = 'Copied!';
         setTimeout(() => btn.textContent = 'Copy ID', 1500);
       });
+    });
+
+    // ── QR scanner ──
+    $('#scan-qr-btn').addEventListener('click', () => {
+      openQrScanner();
+    });
+
+    $('#qr-camera-btn').addEventListener('click', () => {
+      openQrScanner();
+    });
+
+    $('#qr-image-btn').addEventListener('click', () => {
+      $('#qr-image-input').click();
+    });
+
+    $('#qr-image-input').addEventListener('change', async () => {
+      const file = $('#qr-image-input').files[0];
+      $('#qr-image-input').value = '';
+      if (!qrDetector) {
+        try {
+          const formats = await BarcodeDetector.getSupportedFormats();
+          if (!formats.includes('qr_code')) throw new Error('QR support unavailable');
+          qrDetector = new BarcodeDetector({ formats: ['qr_code'] });
+        } catch {
+          $('#qr-scanner-status').textContent = 'Image scanning is unavailable in this browser. Enter the code manually.';
+          return;
+        }
+      }
+      await scanQrImage(file);
     });
 
     // ── Sound Toggle ──
@@ -520,12 +632,36 @@ const BitMaskApp = (() => {
       cancelTyping();
 
       try {
-        const { cipher, nonce } = await BitMaskCrypto.encrypt(key, text);
+        const payload = {
+          kind: 'text',
+          text,
+          replyTo: replyTarget ? {
+            id: replyTarget.id,
+            preview: replyTarget.preview,
+          } : null,
+        };
+        const { cipher, nonce } = await BitMaskCrypto.encrypt(key, JSON.stringify(payload));
         const res = await BitMaskSocket.sendMessage(currentRoomId, cipher, nonce, messageTTL);
-        renderMessage(res.msgId, text, 'outgoing', messageTTL);
+        renderMessage(res.msgId, text, 'outgoing', messageTTL, null, payload.replyTo);
+        clearReplyTarget();
         BitMaskSound.playOutgoing();
       } catch (err) {
         showToast('Failed to send: ' + err.message, 'error');
+      }
+    });
+
+    $('#cancel-reply-btn').addEventListener('click', clearReplyTarget);
+
+    $('#messages-container').addEventListener('click', (event) => {
+      const action = event.target.closest('[data-message-action]');
+      if (!action) return;
+      const messageId = action.closest('.message')?.dataset.messageId;
+      if (!messageId) return;
+
+      if (action.dataset.messageAction === 'reply') {
+        beginReply(messageId);
+      } else if (action.dataset.messageAction === 'reaction') {
+        sendReaction(messageId, action.dataset.reaction);
       }
     });
 
@@ -580,7 +716,7 @@ const BitMaskApp = (() => {
 
     // ── Panic Button ──
     $('#panic-btn').addEventListener('click', () => {
-      if (confirm('🚨 EMERGENCY PANIC: Scrub all keys, storage, and exit immediately?')) {
+      if (confirm('Emergency wipe: erase keys, storage, and exit immediately?')) {
         BitMaskPanic.trigger();
       }
     });
@@ -651,13 +787,35 @@ const BitMaskApp = (() => {
     // ── Close modals via backdrop / X button ──
     $$('.modal-backdrop').forEach(bd => {
       bd.addEventListener('click', () => {
-        bd.closest('.modal').classList.add('hidden');
+        const modal = bd.closest('.modal');
+        if (modal?.id === 'media-preview-modal') closeMediaPreview();
+        else if (modal?.id === 'qr-scanner-modal') closeQrScannerModal();
+        else if (modal) closeModal(modal.id);
       });
     });
     $$('.modal-close-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        btn.closest('.modal').classList.add('hidden');
+        const modal = btn.closest('.modal');
+        if (modal?.id === 'media-preview-modal') closeMediaPreview();
+        else if (modal?.id === 'qr-scanner-modal') closeQrScannerModal();
+        else if (modal) closeModal(modal.id);
       });
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape') return;
+      const mediaPreview = $('#media-preview-modal');
+      if (mediaPreview && !mediaPreview.classList.contains('hidden')) {
+        closeMediaPreview();
+        return;
+      }
+      const scanner = $('#qr-scanner-modal');
+      if (scanner && !scanner.classList.contains('hidden')) {
+        closeQrScannerModal();
+        return;
+      }
+      const openModalEl = $('.modal:not(.hidden)');
+      if (openModalEl) closeModal(openModalEl.id);
     });
 
     // ── Open Export Modal ──
@@ -809,6 +967,11 @@ const BitMaskApp = (() => {
   function setupFileHandlers() {
     const fileInput = $('#file-input');
     const attachBtn = $('#file-attach-btn');
+    const chatForm = $('#chat-form');
+    const messageInput = $('#message-input');
+    const MAX_SIZE = 25 * 1024 * 1024;
+    const MAX_SOURCE_SIZE = 50 * 1024 * 1024;
+    const CHUNK_SIZE = 512 * 1024;
 
     attachBtn.addEventListener('click', () => {
       const key = isGroupChat ? groupKey : sharedKey;
@@ -829,34 +992,45 @@ const BitMaskApp = (() => {
       );
     });
 
-    fileInput.addEventListener('change', async () => {
-      const file = fileInput.files[0];
+    async function sendFile(file) {
       if (!file) return;
-      fileInput.value = ''; // Reset
 
-      const MAX_SIZE = 5 * 1024 * 1024; // 5MB
-      if (file.size > MAX_SIZE) {
-        showToast('File too large. Maximum 5MB.', 'error');
+      if (file.size > MAX_SOURCE_SIZE) {
+        showToast('File too large. Maximum source size is 50MB.', 'error');
         return;
       }
 
       const key = isGroupChat ? groupKey : sharedKey;
-      if (!key) {
+      if (!key || !currentRoomId) {
         showToast('Encryption key not ready.', 'warning');
         return;
       }
 
+      const sendingMsg = addSystemMessage(`Preparing ${file.name || 'file'}…`);
       try {
-        const sendingMsg = addSystemMessage(`Sending ${file.name}...`);
-        const buffer = await file.arrayBuffer();
-        const { cipher, nonce } = await BitMaskCrypto.encryptFile(key, buffer);
+        const preparedFile = await prepareFileForSending(file, (message) => {
+          if (sendingMsg?.parentNode) sendingMsg.textContent = message;
+        });
+        if (preparedFile.size > MAX_SIZE) {
+          showToast('File is still larger than the 25MB transfer limit after optimization.', 'error');
+          return;
+        }
+        const buffer = await preparedFile.arrayBuffer();
+        const mimeType = preparedFile.type || guessMimeType(preparedFile.name);
+        const canViewOnce = mimeType.startsWith('image/') || mimeType.startsWith('video/') || mimeType.startsWith('audio/');
 
         const metadata = {
-          name: file.name,
-          mimeType: file.type || 'application/octet-stream',
-          size: file.size,
-          viewOnce: isViewOnceActive,
+          name: (preparedFile.name || 'untitled-file').slice(-120),
+          mimeType,
+          size: preparedFile.size,
+          originalSize: file.size,
+          optimized: preparedFile.size < file.size,
+          viewOnce: isViewOnceActive && canViewOnce,
         };
+
+        if (isViewOnceActive && !canViewOnce) {
+          showToast('View Once is available for images, video, and audio.', 'warning');
+        }
 
         // Reset view once mode state
         if (isViewOnceActive) {
@@ -864,19 +1038,74 @@ const BitMaskApp = (() => {
           $('#view-once-btn').classList.remove('active');
         }
 
-        const res = await BitMaskSocket.sendFile(currentRoomId, cipher, nonce, metadata, messageTTL);
+        if (sendingMsg?.parentNode) sendingMsg.textContent = 'Encrypting media…';
+        const encryptedChunks = await BitMaskCrypto.encryptFileChunks(
+          key,
+          buffer,
+          CHUNK_SIZE,
+          (completed, total) => {
+            if (sendingMsg?.parentNode) sendingMsg.textContent = `Encrypting media · ${completed}/${total}`;
+          }
+        );
+        const res = await BitMaskSocket.startFile(currentRoomId, metadata, messageTTL, encryptedChunks.length);
 
-        // Remove the "Sending..." indicator
-        if (sendingMsg && sendingMsg.parentNode) sendingMsg.remove();
+        for (let index = 0; index < encryptedChunks.length; index++) {
+          await BitMaskSocket.sendFileChunk(
+            currentRoomId,
+            res.msgId,
+            index,
+            encryptedChunks[index].cipher,
+            encryptedChunks[index].nonce,
+          );
+          if (sendingMsg?.parentNode) sendingMsg.textContent = `Sending media · ${index + 1}/${encryptedChunks.length}`;
+        }
+        await BitMaskSocket.completeFile(currentRoomId, res.msgId);
 
         // Render locally
-        const blob = new Blob([buffer], { type: file.type });
+        const blob = new Blob([buffer], { type: mimeType });
         const url = URL.createObjectURL(blob);
         renderFileMessage(res.msgId, metadata, url, 'outgoing', messageTTL);
         BitMaskSound.playOutgoing();
       } catch (err) {
         showToast('Failed to send file: ' + err.message, 'error');
+      } finally {
+        if (sendingMsg && sendingMsg.parentNode) sendingMsg.remove();
       }
+    }
+
+    fileInput.addEventListener('change', async () => {
+      const file = fileInput.files[0];
+      fileInput.value = ''; // Reset so the same file can be sent again.
+      await sendFile(file);
+    });
+
+    // Drop files directly on the composer.
+    chatForm.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      if (Array.from(event.dataTransfer?.types || []).includes('Files')) {
+        chatForm.classList.add('drop-ready');
+      }
+    });
+
+    chatForm.addEventListener('dragleave', (event) => {
+      if (!chatForm.contains(event.relatedTarget)) chatForm.classList.remove('drop-ready');
+    });
+
+    chatForm.addEventListener('drop', async (event) => {
+      event.preventDefault();
+      chatForm.classList.remove('drop-ready');
+      const files = Array.from(event.dataTransfer?.files || []);
+      for (const file of files.slice(0, 3)) await sendFile(file);
+      if (files.length > 3) showToast('Only the first 3 dropped files were added.', 'info');
+    });
+
+    // Pasting a screenshot or copied image sends it as encrypted media.
+    messageInput.addEventListener('paste', async (event) => {
+      const image = Array.from(event.clipboardData?.files || [])
+        .find(file => file.type.startsWith('image/'));
+      if (!image) return;
+      event.preventDefault();
+      await sendFile(image);
     });
   }
 
@@ -891,6 +1120,11 @@ const BitMaskApp = (() => {
 
   function switchToChat(remotePeerId) {
     showView('chat-view');
+    updateChatSessionStatus(BitMaskSocket.isConnected() ? 'online' : 'offline');
+    messageRegistry.clear();
+    clearIncomingFileTransfers();
+    revokeAllMediaUrls();
+    clearReplyTarget();
     // 1:1 mode
     $('#chat-direct-info').classList.remove('hidden');
     $('#chat-group-info').classList.add('hidden');
@@ -918,6 +1152,11 @@ const BitMaskApp = (() => {
 
   function switchToGroupChat() {
     showView('chat-view');
+    updateChatSessionStatus(BitMaskSocket.isConnected() ? 'online' : 'offline');
+    messageRegistry.clear();
+    clearIncomingFileTransfers();
+    revokeAllMediaUrls();
+    clearReplyTarget();
     // Group mode
     $('#chat-direct-info').classList.add('hidden');
     $('#chat-group-info').classList.remove('hidden');
@@ -947,9 +1186,7 @@ const BitMaskApp = (() => {
   }
 
   function resetChatState() {
-    if (window.BitMaskCall && window.BitMaskCall.isCallActive) {
-      window.BitMaskCall.hangup(true);
-    }
+    window.BitMaskCall?.hangup(true);
     sharedKey = null;
     currentRoomId = null;
     connectedPeerId = null;
@@ -979,12 +1216,90 @@ const BitMaskApp = (() => {
     }
   }
 
-  function renderMessage(msgId, text, type, ttl, senderPeerId) {
+  function clearIncomingFileTransfers() {
+    incomingFileTransfers.forEach(transfer => clearTimeout(transfer.timeoutId));
+    incomingFileTransfers.clear();
+  }
+
+  function rememberMediaUrl(msgId, blobUrl) {
+    mediaUrls.set(msgId, blobUrl);
+  }
+
+  function forgetMediaUrl(msgId) {
+    const blobUrl = mediaUrls.get(msgId);
+    if (!blobUrl) return;
+    if (activeViewOnceMsgId === msgId) {
+      activeViewOnceCleanup = null;
+      activeViewOnceMsgId = null;
+      closeModal('view-once-modal');
+    }
+    const previewMedia = $('#media-preview-container')?.querySelector('[src]');
+    if (previewMedia?.src === blobUrl) closeMediaPreview();
+    URL.revokeObjectURL(blobUrl);
+    mediaUrls.delete(msgId);
+  }
+
+  function revokeAllMediaUrls() {
+    mediaUrls.forEach((url) => URL.revokeObjectURL(url));
+    mediaUrls.clear();
+    closeMediaPreview();
+  }
+
+  function openMediaPreview(metadata, blobUrl) {
+    const container = $('#media-preview-container');
+    const meta = $('#media-preview-meta');
+    if (!container || !meta) return;
+
+    container.innerHTML = '';
+    meta.textContent = `${metadata.name} · ${formatFileSize(metadata.size)}`;
+
+    let mediaEl;
+    if (metadata.mimeType.startsWith('image/')) {
+      mediaEl = document.createElement('img');
+      mediaEl.alt = metadata.name;
+      mediaEl.decoding = 'async';
+    } else if (metadata.mimeType.startsWith('video/')) {
+      mediaEl = document.createElement('video');
+      mediaEl.controls = true;
+      mediaEl.autoplay = true;
+      mediaEl.playsInline = true;
+    } else if (metadata.mimeType.startsWith('audio/')) {
+      mediaEl = document.createElement('audio');
+      mediaEl.controls = true;
+      mediaEl.autoplay = true;
+    } else {
+      mediaEl = document.createElement('div');
+      mediaEl.className = 'message-content';
+      mediaEl.textContent = 'Preview unavailable for this file. Use Save to download it.';
+    }
+
+    if (mediaEl.tagName !== 'DIV') {
+      mediaEl.src = blobUrl;
+      mediaEl.addEventListener('error', () => {
+        container.textContent = 'This media could not be previewed. Use Save to download it.';
+      }, { once: true });
+    }
+
+    container.appendChild(mediaEl);
+    openModal('media-preview-modal');
+  }
+
+  function closeMediaPreview() {
+    const modal = $('#media-preview-modal');
+    if (!modal) return;
+    modal.classList.add('hidden');
+    modal.setAttribute('aria-hidden', 'true');
+    $('#media-preview-container').innerHTML = '';
+    $('#media-preview-meta').textContent = '';
+  }
+
+  function renderMessage(msgId, text, type, ttl, senderPeerId, replyTo = null) {
     clearInitialBanner();
     const container = $('#messages-container');
     const el = document.createElement('div');
     el.className = `message ${type}`;
     el.id = `msg-${msgId}`;
+    el.dataset.messageId = msgId;
 
     // Show sender label in group mode for incoming messages
     if (senderPeerId && type.includes('incoming')) {
@@ -999,22 +1314,31 @@ const BitMaskApp = (() => {
     content.className = 'message-content';
     content.textContent = text;
 
+    if (replyTo?.preview) {
+      el.appendChild(createReplyReference(replyTo));
+    }
+
     const meta = createMessageMeta(ttl);
     el.appendChild(content);
+    appendMessageActions(el, msgId, text);
     el.appendChild(meta.el);
 
     container.appendChild(el);
     container.scrollTop = container.scrollHeight;
+    messageRegistry.set(msgId, { element: el, text, type });
 
     startSelfDestruct(msgId, el, meta.timerEl, meta.progressBarEl, ttl);
   }
 
   function renderFileMessage(msgId, metadata, blobUrl, type, ttl, senderPeerId) {
+    metadata = normalizeFileMetadata(metadata);
+    rememberMediaUrl(msgId, blobUrl);
     clearInitialBanner();
     const container = $('#messages-container');
     const el = document.createElement('div');
     el.className = `message ${type}`;
     el.id = `msg-${msgId}`;
+    el.dataset.messageId = msgId;
 
     // Show sender label in group mode for incoming files
     if (senderPeerId && type.includes('incoming')) {
@@ -1033,19 +1357,26 @@ const BitMaskApp = (() => {
       const tile = document.createElement('div');
       tile.className = 'view-once-tile';
       tile.innerHTML = `
-        <span class="view-once-tile-icon">👁️</span>
-        <span class="view-once-tile-text">Tap to View (View Once Media)</span>
+        <span class="view-once-tile-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></span>
+        <span class="view-once-tile-text">Open once · ${metadata.name}</span>
       `;
 
       tile.addEventListener('click', () => {
         const container = $('#view-once-media-container');
         container.innerHTML = '';
         let mediaEl;
-        if (metadata.mimeType && metadata.mimeType.startsWith('image/')) {
+        if (metadata.mimeType.startsWith('image/')) {
           mediaEl = document.createElement('img');
           mediaEl.src = blobUrl;
-        } else if (metadata.mimeType && metadata.mimeType.startsWith('video/')) {
+          mediaEl.alt = metadata.name;
+        } else if (metadata.mimeType.startsWith('video/')) {
           mediaEl = document.createElement('video');
+          mediaEl.src = blobUrl;
+          mediaEl.controls = true;
+          mediaEl.autoplay = true;
+          mediaEl.playsInline = true;
+        } else if (metadata.mimeType.startsWith('audio/')) {
+          mediaEl = document.createElement('audio');
           mediaEl.src = blobUrl;
           mediaEl.controls = true;
           mediaEl.autoplay = true;
@@ -1057,14 +1388,19 @@ const BitMaskApp = (() => {
         openModal('view-once-modal');
 
         // Mark tile as destroyed
-        tile.innerHTML = '<span class="view-once-tile-text">[Media Opened & Destroyed]</span>';
+        tile.innerHTML = '<span class="view-once-tile-text">Media opened and destroyed</span>';
         tile.style.opacity = '0.5';
         tile.style.pointerEvents = 'none';
 
         const closeHandler = () => {
-          URL.revokeObjectURL(blobUrl);
+          if (activeViewOnceCleanup !== closeHandler) return;
+          activeViewOnceCleanup = null;
+          activeViewOnceMsgId = null;
+          forgetMediaUrl(msgId);
           container.innerHTML = '';
         };
+        activeViewOnceCleanup = closeHandler;
+        activeViewOnceMsgId = msgId;
         $('#view-once-modal .view-once-close-btn').addEventListener('click', closeHandler, { once: true });
         $('#view-once-modal .modal-backdrop').addEventListener('click', closeHandler, { once: true });
       });
@@ -1076,11 +1412,26 @@ const BitMaskApp = (() => {
       if (isImage) {
         const preview = document.createElement('div');
         preview.className = 'file-preview';
+        preview.tabIndex = 0;
+        preview.setAttribute('role', 'button');
+        preview.setAttribute('aria-label', `Open image ${metadata.name}`);
         const img = document.createElement('img');
         img.src = blobUrl;
         img.alt = metadata.name;
         img.loading = 'lazy';
-        preview.addEventListener('click', () => window.open(blobUrl, '_blank'));
+        img.decoding = 'async';
+        const openPreview = () => openMediaPreview(metadata, blobUrl);
+        preview.addEventListener('click', openPreview);
+        preview.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            openPreview();
+          }
+        });
+        img.addEventListener('error', () => {
+          preview.classList.add('is-broken');
+          preview.textContent = 'Preview unavailable. Use Save to download the encrypted media.';
+        }, { once: true });
         preview.appendChild(img);
         bubble.appendChild(preview);
       }
@@ -1102,13 +1453,16 @@ const BitMaskApp = (() => {
 
       const size = document.createElement('div');
       size.className = 'file-info-size';
-      size.textContent = formatFileSize(metadata.size);
+      size.textContent = metadata.optimized
+        ? `${formatFileSize(metadata.size)} · optimized locally`
+        : formatFileSize(metadata.size);
 
       details.appendChild(name);
       details.appendChild(size);
 
       const dlBtn = document.createElement('button');
       dlBtn.className = 'file-download-btn';
+      dlBtn.type = 'button';
       dlBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v7m0 0L3 5.5M6 8l3-2.5M1 10h10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg> Save';
       dlBtn.addEventListener('click', () => {
         const a = document.createElement('a');
@@ -1125,12 +1479,115 @@ const BitMaskApp = (() => {
 
     const meta = createMessageMeta(ttl);
     el.appendChild(bubble);
+    appendMessageActions(el, msgId, metadata.name);
     el.appendChild(meta.el);
 
     container.appendChild(el);
     container.scrollTop = container.scrollHeight;
+    messageRegistry.set(msgId, { element: el, text: metadata.name, type });
 
     startSelfDestruct(msgId, el, meta.timerEl, meta.progressBarEl, ttl);
+  }
+
+  function createReplyReference(replyTo) {
+    const reference = document.createElement('div');
+    reference.className = 'message-reply-reference';
+    const label = document.createElement('span');
+    label.className = 'message-reply-label';
+    label.textContent = 'Reply';
+    const preview = document.createElement('span');
+    preview.textContent = replyTo.preview;
+    reference.append(label, preview);
+    return reference;
+  }
+
+  function appendMessageActions(el, msgId, text) {
+    const actions = document.createElement('div');
+    actions.className = 'message-actions';
+
+    const replyButton = document.createElement('button');
+    replyButton.type = 'button';
+    replyButton.className = 'message-action';
+    replyButton.dataset.messageAction = 'reply';
+    replyButton.setAttribute('aria-label', 'Reply to this message');
+    replyButton.textContent = 'Reply';
+    actions.appendChild(replyButton);
+
+    for (const label of ['Like', 'Agree', 'Thanks']) {
+      const reactionButton = document.createElement('button');
+      reactionButton.type = 'button';
+      reactionButton.className = 'message-action';
+      reactionButton.dataset.messageAction = 'reaction';
+      reactionButton.dataset.reaction = label;
+      reactionButton.setAttribute('aria-label', `${label} this message`);
+      reactionButton.textContent = label;
+      actions.appendChild(reactionButton);
+    }
+
+    el.appendChild(actions);
+  }
+
+  function beginReply(msgId) {
+    const message = messageRegistry.get(msgId);
+    if (!message) return;
+    replyTarget = {
+      id: msgId,
+      preview: String(message.text || '').replace(/\s+/g, ' ').trim().slice(0, 140),
+    };
+    $('#reply-preview-text').textContent = replyTarget.preview || 'Encrypted media';
+    $('#reply-preview').classList.remove('hidden');
+    $('#message-input').focus();
+  }
+
+  function clearReplyTarget() {
+    replyTarget = null;
+    const preview = $('#reply-preview');
+    if (preview) preview.classList.add('hidden');
+    const previewText = $('#reply-preview-text');
+    if (previewText) previewText.textContent = '';
+  }
+
+  async function sendReaction(targetId, label) {
+    const key = isGroupChat ? groupKey : sharedKey;
+    if (!key || !currentRoomId || !label) return;
+    try {
+      const payload = JSON.stringify({ kind: 'reaction', targetId, label });
+      const { cipher, nonce } = await BitMaskCrypto.encrypt(key, payload);
+      await BitMaskSocket.sendMessage(currentRoomId, cipher, nonce, messageTTL);
+      applyReaction(targetId, label, messageTTL);
+      BitMaskSound.playOutgoing();
+    } catch (err) {
+      showToast('Failed to send reaction: ' + err.message, 'error');
+    }
+  }
+
+  function applyReaction(targetId, label, ttl) {
+    const message = messageRegistry.get(targetId);
+    if (!message?.element || !label) return;
+
+    let reactions = message.element.querySelector('.message-reactions');
+    if (!reactions) {
+      reactions = document.createElement('div');
+      reactions.className = 'message-reactions';
+      message.element.insertBefore(reactions, message.element.querySelector('.message-meta'));
+    }
+
+    const chip = document.createElement('span');
+    chip.className = 'message-reaction-chip';
+    chip.textContent = label;
+    reactions.appendChild(chip);
+    setTimeout(() => chip.remove(), Math.max(5000, Number(ttl) || messageTTL));
+  }
+
+  function decodeMessagePayload(plaintext) {
+    try {
+      const parsed = JSON.parse(plaintext);
+      if (parsed?.kind === 'reaction') return parsed;
+      if (parsed?.kind === 'text' && typeof parsed.text === 'string') return parsed;
+    } catch {
+      // Messages from older clients are raw plaintext and remain readable.
+    }
+    return { kind: 'text', text: plaintext, replyTo: null };
   }
 
   function createMessageMeta(ttl) {
@@ -1139,7 +1596,7 @@ const BitMaskApp = (() => {
 
     const lockIcon = document.createElement('span');
     lockIcon.className = 'lock-icon';
-    lockIcon.textContent = '🔒';
+    lockIcon.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>';
 
     const time = document.createElement('span');
     time.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -1206,6 +1663,9 @@ const BitMaskApp = (() => {
   }
 
   function destroyMessage(el) {
+    const msgId = el.dataset.messageId;
+    if (msgId) forgetMediaUrl(msgId);
+    if (msgId) messageRegistry.delete(msgId);
     el.classList.add('destroying');
     el.addEventListener('animationend', () => el.remove(), { once: true });
     setTimeout(() => { if (el.parentNode) el.remove(); }, 1000);
@@ -1215,6 +1675,10 @@ const BitMaskApp = (() => {
     messageTimers.forEach(timer => clearInterval(timer));
     messageTimers.clear();
     $$('.message').forEach(el => destroyMessage(el));
+    messageRegistry.clear();
+    clearIncomingFileTransfers();
+    clearReplyTarget();
+    revokeAllMediaUrls();
   }
 
   function addSystemMessage(text) {
@@ -1232,11 +1696,24 @@ const BitMaskApp = (() => {
   // ══════════════════════════════════════════════════════════
 
   function openModal(id) {
-    $(`#${id}`).classList.remove('hidden');
+    const modal = $(`#${id}`);
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    modal.setAttribute('aria-hidden', 'false');
   }
 
   function closeModal(id) {
-    $(`#${id}`).classList.add('hidden');
+    if (id === 'media-preview-modal') {
+      closeMediaPreview();
+      return;
+    }
+    if (id === 'view-once-modal' && activeViewOnceCleanup) {
+      activeViewOnceCleanup();
+    }
+    const modal = $(`#${id}`);
+    if (!modal) return;
+    modal.classList.add('hidden');
+    modal.setAttribute('aria-hidden', 'true');
   }
 
   // ══════════════════════════════════════════════════════════
@@ -1264,6 +1741,271 @@ const BitMaskApp = (() => {
     label.textContent = status.charAt(0).toUpperCase() + status.slice(1);
   }
 
+  function updateChatSessionStatus(status) {
+    const statusEl = $('#chat-session-status');
+    const label = $('#chat-session-status-label');
+    if (!statusEl || !label) return;
+    const online = status === 'online';
+    statusEl.classList.toggle('offline', !online);
+    label.textContent = online ? 'Secure session' : 'Reconnecting…';
+  }
+
+  function startQualityMonitor() {
+    stopQualityMonitor();
+    measureConnectionQuality();
+    qualityInterval = setInterval(measureConnectionQuality, 10000);
+  }
+
+  function stopQualityMonitor() {
+    if (qualityInterval) clearInterval(qualityInterval);
+    qualityInterval = null;
+    updateNetworkQuality(null);
+  }
+
+  async function measureConnectionQuality() {
+    try {
+      const latency = await BitMaskSocket.measureLatency();
+      updateNetworkQuality(latency);
+    } catch {
+      updateNetworkQuality(null);
+    }
+  }
+
+  function updateNetworkQuality(latency) {
+    const quality = $('#network-quality');
+    const label = $('#network-quality-label');
+    if (!quality || !label) return;
+
+    quality.classList.remove('excellent', 'good', 'fair', 'poor', 'unknown');
+    if (!Number.isFinite(latency)) {
+      quality.classList.add('unknown');
+      label.textContent = 'Unavailable';
+      quality.title = 'Connection quality unavailable';
+      return;
+    }
+
+    const state = latency < 100 ? 'excellent' : latency < 220 ? 'good' : latency < 450 ? 'fair' : 'poor';
+    quality.classList.add(state);
+    label.textContent = `${latency} ms`;
+    quality.title = `Connection latency: ${latency} ms`;
+  }
+
+  async function prepareFileForSending(file, onProgress) {
+    const type = file.type || guessMimeType(file.name);
+    const shouldOptimize = type.startsWith('image/') && !['image/gif', 'image/svg+xml'].includes(type);
+    if (!shouldOptimize || typeof window.createImageBitmap !== 'function') return file;
+
+    onProgress?.('Optimizing image locally…');
+    let bitmap;
+    try {
+      bitmap = await createImageBitmap(file);
+      const maxDimension = 1920;
+      const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
+      const width = Math.max(1, Math.round(bitmap.width * scale));
+      const height = Math.max(1, Math.round(bitmap.height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext('2d', { alpha: true });
+      context.drawImage(bitmap, 0, 0, width, height);
+      const compressed = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.82));
+      bitmap.close?.();
+      if (!compressed || compressed.size >= file.size) return file;
+
+      const baseName = (file.name || 'image').replace(/\.[^/.]+$/, '');
+      return new File([compressed], `${baseName}.jpg`, {
+        type: 'image/jpeg',
+        lastModified: Date.now(),
+      });
+    } catch (err) {
+      bitmap?.close?.();
+      console.info('[BitMask] Image optimization skipped:', err.message);
+      return file;
+    }
+  }
+
+  async function openQrScanner() {
+    if (await openNativeQrScanner()) return;
+
+    const status = $('#qr-scanner-status');
+    const placeholder = $('#qr-scanner-placeholder');
+    openModal('qr-scanner-modal');
+    stopQrScanner();
+    if (status) status.textContent = 'Preparing camera scanner…';
+    if (placeholder) placeholder.classList.remove('hidden');
+
+    if (typeof window.BarcodeDetector !== 'function') {
+      if (status) status.textContent = 'Camera scanning is unavailable here. Try Scan image or enter the code manually.';
+      return;
+    }
+
+    try {
+      const formats = await BarcodeDetector.getSupportedFormats();
+      if (!formats.includes('qr_code')) throw new Error('QR scanning is not supported by this browser.');
+      qrDetector = new BarcodeDetector({ formats: ['qr_code'] });
+      await startQrCamera();
+    } catch (err) {
+      if (status) status.textContent = err.name === 'NotAllowedError'
+        ? 'Camera permission was not granted. Use Scan image or allow camera access.'
+        : 'Camera scanner is unavailable. Use Scan image or enter the code manually.';
+      console.info('[BitMask] QR camera unavailable:', err.message);
+    }
+  }
+
+  async function openNativeQrScanner() {
+    if (!window.BitMaskConfig?.isNative || !window.Capacitor?.registerPlugin) return false;
+
+    try {
+      const scanner = window.Capacitor.registerPlugin('CapacitorBarcodeScanner');
+      const result = await scanner.scanBarcode({
+        hint: 0,
+        scanInstructions: 'Scan a BitMask peer or room QR code',
+        scanButton: false,
+        cameraDirection: 1,
+        scanOrientation: 3,
+        cancelButtonAccessibilityLabel: 'Cancel QR scan',
+        android: { scanningLibrary: 'MLKIT' },
+      });
+      const rawValue = result?.ScanResult;
+      if (rawValue) handleScannedValue(rawValue);
+      return true;
+    } catch (error) {
+      const message = String(error?.message || error || '').toLowerCase();
+      if (message.includes('cancel')) return true;
+      console.info('[BitMask] Native QR scanner unavailable:', error);
+      return false;
+    }
+  }
+
+  async function startQrCamera() {
+    if (!qrDetector) return;
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera API unavailable.');
+    qrScannerStream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+    });
+    const video = $('#qr-scanner-video');
+    video.srcObject = qrScannerStream;
+    await video.play();
+    video.classList.add('active');
+    $('#qr-scanner-placeholder')?.classList.add('hidden');
+    $('#qr-scanner-status').textContent = 'Point your camera at a BitMask QR code.';
+    scanQrFrame();
+  }
+
+  function scanQrFrame() {
+    if (!qrScannerStream || !qrDetector || !$('#qr-scanner-video') || $('#qr-scanner-modal').classList.contains('hidden')) return;
+    qrScannerFrame = requestAnimationFrame(async () => {
+      if (!qrScanBusy) {
+        qrScanBusy = true;
+        try {
+          const results = await qrDetector.detect($('#qr-scanner-video'));
+          if (results?.[0]?.rawValue) {
+            handleScannedValue(results[0].rawValue);
+            return;
+          }
+        } catch (err) {
+          console.info('[BitMask] QR frame skipped:', err.message);
+        } finally {
+          qrScanBusy = false;
+        }
+      }
+      scanQrFrame();
+    });
+  }
+
+  async function scanQrImage(file) {
+    if (!file || !qrDetector) {
+      $('#qr-scanner-status').textContent = 'Image scanning needs QR support in this browser.';
+      return;
+    }
+
+    stopQrCameraOnly();
+    $('#qr-scanner-status').textContent = 'Reading image…';
+    const objectUrl = URL.createObjectURL(file);
+    try {
+      const image = new Image();
+      image.src = objectUrl;
+      await image.decode();
+      const results = await qrDetector.detect(image);
+      if (!results?.[0]?.rawValue) throw new Error('No QR code found.');
+      handleScannedValue(results[0].rawValue);
+    } catch {
+      $('#qr-scanner-status').textContent = 'No BitMask QR code found in that image.';
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
+  }
+
+  function handleScannedValue(rawValue) {
+    const result = parseScannedValue(rawValue);
+    if (!result) {
+      $('#qr-scanner-status').textContent = 'That QR code is not a BitMask peer or room code.';
+      return;
+    }
+
+    stopQrScanner();
+    closeModal('qr-scanner-modal');
+    if (result.kind === 'peer') {
+      $('#target-peer-input').value = result.value;
+      showToast('Peer ID scanned. Connecting…', 'success');
+      $('#connect-form').requestSubmit();
+    } else {
+      $('#room-code-input').value = result.value;
+      showToast('Room code scanned. Joining…', 'success');
+      $('#join-group-form').requestSubmit();
+    }
+  }
+
+  function parseScannedValue(rawValue) {
+    const raw = String(rawValue || '').trim();
+    if (!raw) return null;
+
+    let value = raw;
+    try {
+      const url = new URL(raw);
+      if (url.hash) value = url.hash;
+    } catch {
+      // The QR may contain a raw peer ID or room code rather than a URL.
+    }
+
+    const hash = value.replace(/^#/, '');
+    const peerMatch = hash.match(/^peer=([A-Fa-f0-9\s-]{16,24})$/i);
+    if (peerMatch) value = peerMatch[1];
+    const roomMatch = hash.match(/^room=([A-Za-z0-9]{6})$/i);
+    if (roomMatch) return { kind: 'room', value: roomMatch[1].toUpperCase() };
+
+    const compact = value.replace(/[\s-]/g, '').toUpperCase();
+    if (/^[A-F0-9]{16}$/.test(compact)) return { kind: 'peer', value: compact };
+    if (/^[A-HJ-NP-Z2-9]{6}$/.test(compact)) return { kind: 'room', value: compact };
+    return null;
+  }
+
+  function stopQrCameraOnly() {
+    if (qrScannerFrame) cancelAnimationFrame(qrScannerFrame);
+    qrScannerFrame = null;
+    if (qrScannerStream) {
+      qrScannerStream.getTracks().forEach(track => track.stop());
+      qrScannerStream = null;
+    }
+    const video = $('#qr-scanner-video');
+    if (video) {
+      video.pause();
+      video.srcObject = null;
+      video.classList.remove('active');
+    }
+  }
+
+  function stopQrScanner() {
+    stopQrCameraOnly();
+    qrScanBusy = false;
+  }
+
+  function closeQrScannerModal() {
+    stopQrScanner();
+    closeModal('qr-scanner-modal');
+  }
+
   function showToast(message, type = 'info') {
     const container = $('#toast-container');
     const toast = document.createElement('div');
@@ -1286,7 +2028,8 @@ const BitMaskApp = (() => {
   // ══════════════════════════════════════════════════════════
 
   function formatPeerId(id) {
-    return id.match(/.{1,4}/g).join(' - ');
+    if (!id) return '----';
+    return String(id).match(/.{1,4}/g).join(' - ');
   }
 
   function formatTTL(ms) {
@@ -1308,20 +2051,65 @@ const BitMaskApp = (() => {
   }
 
   function formatFileSize(bytes) {
+    bytes = Number(bytes) || 0;
     if (bytes < 1024) return bytes + ' B';
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   }
 
   function getFileIcon(mimeType) {
-    if (!mimeType) return '📄';
-    if (mimeType.startsWith('image/')) return '🖼️';
-    if (mimeType.startsWith('video/')) return '🎬';
-    if (mimeType.startsWith('audio/')) return '🎵';
-    if (mimeType.includes('pdf')) return '📕';
-    if (mimeType.includes('zip') || mimeType.includes('rar') || mimeType.includes('7z')) return '🗜️';
-    if (mimeType.includes('text')) return '📝';
-    return '📄';
+    if (!mimeType) return 'FILE';
+    if (mimeType.startsWith('image/')) return 'IMG';
+    if (mimeType.startsWith('video/')) return 'VID';
+    if (mimeType.startsWith('audio/')) return 'AUD';
+    if (mimeType.includes('pdf')) return 'PDF';
+    if (mimeType.includes('zip') || mimeType.includes('rar') || mimeType.includes('7z')) return 'ZIP';
+    if (mimeType.includes('text')) return 'TXT';
+    return 'FILE';
+  }
+
+  function normalizeFileMetadata(metadata = {}) {
+    const name = typeof metadata.name === 'string' && metadata.name.trim()
+      ? metadata.name.trim().slice(-120)
+      : 'Encrypted file';
+    const rawMime = typeof metadata.mimeType === 'string' ? metadata.mimeType.trim() : '';
+    const mimeType = /^[\w.+-]+\/[\w.+-]+(?:;[^\s]+)?$/.test(rawMime)
+      ? rawMime.slice(0, 120)
+      : 'application/octet-stream';
+    return {
+      name,
+      mimeType,
+      size: Math.max(0, Number(metadata.size) || 0),
+      originalSize: Math.max(0, Number(metadata.originalSize) || Number(metadata.size) || 0),
+      optimized: metadata.optimized === true,
+      viewOnce: metadata.viewOnce === true,
+    };
+  }
+
+  function guessMimeType(name = '') {
+    const extension = String(name).toLowerCase().split('.').pop();
+    const types = {
+      avif: 'image/avif',
+      bmp: 'image/bmp',
+      gif: 'image/gif',
+      heic: 'image/heic',
+      jpeg: 'image/jpeg',
+      jpg: 'image/jpeg',
+      png: 'image/png',
+      svg: 'image/svg+xml',
+      webp: 'image/webp',
+      mp3: 'audio/mpeg',
+      ogg: 'audio/ogg',
+      wav: 'audio/wav',
+      mp4: 'video/mp4',
+      webm: 'video/webm',
+      mov: 'video/quicktime',
+      pdf: 'application/pdf',
+      json: 'application/json',
+      txt: 'text/plain',
+      zip: 'application/zip',
+    };
+    return types[extension] || 'application/octet-stream';
   }
 
   function cancelTyping() {
