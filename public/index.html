@@ -10,9 +10,11 @@
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/css/style.css" />
   <link rel="manifest" href="/manifest.json" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎭</text></svg>" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='24' fill='%237785ff'/%3E%3Ccircle cx='34' cy='44' r='8' fill='white'/%3E%3Ccircle cx='66' cy='44' r='8' fill='white'/%3E%3Cpath d='M25 63c15 14 35 14 50 0' fill='none' stroke='white' stroke-width='7' stroke-linecap='round'/%3E%3C/svg%3E" />
 </head>
 <body>
+
+  <a class="skip-link" href="#message-input">Skip to chat input</a>
 
   <!-- Ambient background glow elements -->
   <div class="ambient-glow glow-1"></div>
@@ -44,7 +46,12 @@
         <h1>BitMask</h1>
       </div>
       <div class="unlock-card">
-        <div class="unlock-icon">🔐</div>
+        <div class="unlock-icon" aria-hidden="true">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="4" y="10" width="16" height="10" rx="2" />
+            <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+          </svg>
+        </div>
         <h2>Identity Locked</h2>
         <p>Your identity <code id="locked-peer-id">----</code> is protected by a passphrase.</p>
         <form id="unlock-form">
@@ -62,6 +69,7 @@
 
       <!-- Header -->
       <header class="landing-header">
+        <div class="landing-eyebrow"><span class="eyebrow-dot"></span> Private by design</div>
         <div class="logo">
           <div class="logo-icon">
             <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
@@ -81,6 +89,7 @@
           <h1>BitMask</h1>
         </div>
         <p class="tagline">Anonymous. Encrypted. Ephemeral.</p>
+        <p class="landing-intro">A calm, fast place to talk without accounts, tracking, or a message database.</p>
       </header>
 
       <!-- Identity Card -->
@@ -146,7 +155,10 @@
           <div class="identity-buttons">
             <button id="export-id-btn" class="btn btn-ghost btn-sm">Export</button>
             <button id="import-id-btn" class="btn btn-ghost btn-sm">Import</button>
-            <button id="lock-id-btn" class="btn btn-ghost btn-sm">🔒 Lock</button>
+            <button id="lock-id-btn" class="btn btn-ghost btn-sm">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+              Lock
+            </button>
           </div>
         </div>
 
@@ -157,7 +169,7 @@
       <section class="connect-section">
         <h2>Connect to a Peer</h2>
         <form id="connect-form">
-          <div class="input-group">
+          <div class="input-group connect-input-group">
             <input
               type="text"
               id="target-peer-input"
@@ -166,7 +178,16 @@
               autocomplete="off"
               spellcheck="false"
             />
-            <button type="submit" id="connect-btn" class="btn btn-accent">Connect</button>
+            <div class="connect-actions">
+              <button type="button" id="scan-qr-btn" class="btn btn-ghost" title="Scan a peer or room QR code">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/>
+                  <path d="M8 8h3v3H8zM13 13h3v3h-3z"/>
+                </svg>
+                Scan
+              </button>
+              <button type="submit" id="connect-btn" class="btn btn-accent">Connect</button>
+            </div>
           </div>
         </form>
       </section>
@@ -204,24 +225,29 @@
       <!-- Features -->
       <section class="features">
         <div class="feature">
-          <div class="feature-icon">🔒</div>
+          <div class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
           <h3>End-to-End Encrypted</h3>
           <p>ECDH key exchange + AES-256-GCM. The server never sees your messages.</p>
         </div>
         <div class="feature">
-          <div class="feature-icon">💨</div>
+          <div class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 8h10a3 3 0 1 0-3-3"/><path d="M4 12h14a3 3 0 1 1-3 3"/><path d="M4 16h7"/></svg></div>
           <h3>Self-Destructing</h3>
           <p>Messages vanish after 5 seconds to 24 hours. You choose the timer.</p>
         </div>
         <div class="feature">
-          <div class="feature-icon">👥</div>
+          <div class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3 19a6 6 0 0 1 12 0"/><path d="M16 5.5a3 3 0 0 1 0 5.8M18 14a5 5 0 0 1 3 5"/></svg></div>
           <h3>Group Rooms</h3>
           <p>Encrypted rooms for 3+ peers. Share a 6-char code and everyone's in.</p>
         </div>
         <div class="feature">
-          <div class="feature-icon">👻</div>
+          <div class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18.5V9a6 6 0 0 1 12 0v9.5l-2.5-1.8-2.5 1.8-2.5-1.8L8 18.5 6 20v-1.5Z"/><circle cx="9" cy="10" r=".8" fill="currentColor"/><circle cx="15" cy="10" r=".8" fill="currentColor"/></svg></div>
           <h3>Zero Knowledge</h3>
           <p>No accounts. No logs. No phone numbers. Identity dies when you close the tab.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m4 17 4.5-4 3 2.5 2-2 6.5 5"/></svg></div>
+          <h3>Media that behaves</h3>
+          <p>Send images by attach, paste, or drop. Encrypted previews stay local and clean themselves up.</p>
         </div>
       </section>
 
@@ -252,6 +278,42 @@
         <button id="qr-copy-btn" class="btn btn-ghost qr-copy-btn">Copy ID</button>
       </div>
       <p class="qr-hint">Let others scan this to connect with you</p>
+    </div>
+  </div>
+
+  <!-- ── QR Scanner Modal ──────────────────────────────────── -->
+  <div id="qr-scanner-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content qr-scanner-modal-content" role="dialog" aria-modal="true" aria-labelledby="qr-scanner-title">
+      <div class="modal-header">
+        <div>
+          <span class="modal-kicker">Mobile connection</span>
+          <h3 id="qr-scanner-title">Scan a QR code</h3>
+        </div>
+        <button class="modal-close-btn" type="button" aria-label="Close QR scanner">&times;</button>
+      </div>
+      <div class="qr-scanner-frame">
+        <video id="qr-scanner-video" playsinline muted aria-label="QR scanner camera preview"></video>
+        <div class="qr-scanner-placeholder" id="qr-scanner-placeholder">
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><path d="M8 8h3v3H8zM13 13h3v3h-3z"/></svg>
+          <strong>Camera preview</strong>
+          <span>Allow camera access to scan a peer or room code.</span>
+        </div>
+        <div class="qr-scanner-corners" aria-hidden="true"></div>
+      </div>
+      <p id="qr-scanner-status" class="qr-scanner-status" role="status">Starting scanner…</p>
+      <div class="qr-scanner-actions">
+        <button id="qr-camera-btn" type="button" class="btn btn-accent">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h3l1.5-2h7L17 7h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13" r="3.5"/></svg>
+          Use camera
+        </button>
+        <button id="qr-image-btn" type="button" class="btn btn-ghost">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m4 17 4.5-4 3 2.5 2-2 6.5 5"/></svg>
+          Scan image
+        </button>
+        <input id="qr-image-input" type="file" accept="image/*" capture="environment" hidden />
+      </div>
+      <p class="qr-scanner-hint">Works with BitMask peer IDs and room invite codes. Your camera stays on this device.</p>
     </div>
   </div>
 
@@ -300,7 +362,7 @@
     <div class="modal-backdrop"></div>
     <div class="modal-content">
       <div class="modal-header">
-        <h3>🔒 Lock Identity</h3>
+          <h3>Lock Identity</h3>
         <button class="modal-close-btn">&times;</button>
       </div>
       <p class="modal-desc">Protect your persistent identity with a passphrase. You'll need to enter it each time you open BitMask.</p>
@@ -343,7 +405,7 @@
     <div class="modal-backdrop"></div>
     <div class="modal-content">
       <div class="modal-header">
-        <h3>👥 Room Members</h3>
+          <h3>Room Members</h3>
         <button class="modal-close-btn">&times;</button>
       </div>
       <div id="members-list" class="members-list"></div>
@@ -376,6 +438,14 @@
             </button>
           </span>
         </div>
+        <div id="chat-session-status" class="chat-session-status" aria-live="polite">
+          <span class="chat-session-dot"></span>
+          <span id="chat-session-status-label">Secure session</span>
+        </div>
+        <div id="network-quality" class="network-quality" aria-live="polite" title="Connection quality">
+          <span class="network-bars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+          <span id="network-quality-label">Checking</span>
+        </div>
       </div>
       <div class="chat-header-right">
         <!-- Group member count -->
@@ -387,6 +457,7 @@
             <path d="M10.5 8c1.5.5 2.5 1.5 2.5 3" stroke="currentColor" stroke-width="1" fill="none" stroke-linecap="round"/>
           </svg>
           <span id="member-count">1</span>
+        </button>
         <!-- Voice & Video Call Buttons (Direct 1:1 only) -->
         <button id="audio-call-btn" class="btn btn-ghost btn-icon hidden" title="Start voice call">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -441,7 +512,14 @@
 
     <!-- Message Input -->
     <form id="chat-form" class="chat-input-bar">
-      <button type="button" id="file-attach-btn" class="btn btn-ghost btn-icon" title="Send file (max 5MB)">
+      <div id="reply-preview" class="reply-preview hidden" aria-live="polite">
+        <div class="reply-preview-copy">
+          <span class="reply-preview-label">Replying to</span>
+          <span id="reply-preview-text"></span>
+        </div>
+        <button id="cancel-reply-btn" type="button" class="btn btn-ghost btn-icon btn-xs" title="Cancel reply" aria-label="Cancel reply">&times;</button>
+      </div>
+      <button type="button" id="file-attach-btn" class="btn btn-ghost btn-icon" title="Send file (max 25MB)">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
         </svg>
@@ -452,14 +530,15 @@
           <circle cx="12" cy="12" r="3"/>
         </svg>
       </button>
-      <input type="file" id="file-input" hidden />
+      <input type="file" id="file-input" accept="image/*,video/*,audio/*,.pdf,.txt,.zip,.json" hidden />
       <textarea
         id="message-input"
-        placeholder="Type a message... "
+        placeholder="Write a message…  (Enter to send)"
         autocomplete="off"
         spellcheck="false"
         maxlength="5000"
         rows="1"
+        aria-label="Message"
       ></textarea>
       <button type="submit" class="btn btn-send" title="Send">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -468,6 +547,22 @@
         </svg>
       </button>
     </form>
+  </div>
+
+  <!-- ── Media Preview Modal ───────────────────────────────── -->
+  <div id="media-preview-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content media-preview-modal-content" role="dialog" aria-modal="true" aria-labelledby="media-preview-title">
+      <div class="modal-header">
+        <div>
+          <span class="modal-kicker">Encrypted media</span>
+          <h3 id="media-preview-title">Preview</h3>
+        </div>
+        <button class="modal-close-btn media-preview-close-btn" type="button" aria-label="Close preview">&times;</button>
+      </div>
+      <div id="media-preview-container" class="media-preview-container"></div>
+      <div id="media-preview-meta" class="media-preview-meta"></div>
+    </div>
   </div>
 
   <!-- ── E2EE Calling Overlay (Floating minimalist panel) ── -->
@@ -487,7 +582,9 @@
         <video id="remote-video" autoplay playsinline></video>
         <!-- Remote voice avatar placeholder -->
         <div id="voice-avatar" class="voice-avatar-container hidden">
-          <div class="voice-avatar-glow">📞</div>
+          <div class="voice-avatar-glow" aria-hidden="true">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.1 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7 12.8 12.8 0 0 0 .7 2.8 2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5 12.8 12.8 0 0 0 2.8.7 2 2 0 0 1 1.7 2.1Z"/></svg>
+          </div>
           <canvas id="voice-wave-canvas" width="280" height="80"></canvas>
           <span class="voice-status">Voice Call in Progress...</span>
         </div>
@@ -524,7 +621,9 @@
   <div id="incoming-call-modal" class="modal hidden">
     <div class="modal-backdrop"></div>
     <div class="modal-content incoming-call-card">
-      <div id="incoming-call-avatar" class="incoming-ring-avatar">📞</div>
+      <div id="incoming-call-avatar" class="incoming-ring-avatar" aria-hidden="true">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.1 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7 12.8 12.8 0 0 0 .7 2.8 2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5 12.8 12.8 0 0 0 2.8.7 2 2 0 0 1 1.7 2.1Z"/></svg>
+      </div>
       <h3 id="incoming-call-title" class="incoming-call-title">Incoming Call...</h3>
       <p id="incoming-call-desc" class="incoming-call-desc">Peer <span id="incoming-caller-id">----</span> is calling you.</p>
       <div class="incoming-call-actions">
@@ -543,11 +642,11 @@
     <div class="modal-backdrop"></div>
     <div class="modal-content view-once-modal-content">
       <div class="modal-header">
-        <h3>👁️ View Once Media</h3>
+        <h3>View Once Media</h3>
         <button class="modal-close-btn view-once-close-btn">&times;</button>
       </div>
       <div id="view-once-media-container" class="view-once-media-container"></div>
-      <p class="view-once-warn">This media will be permanently deleted as soon as you close it.</p>
+      <p class="view-once-warn">This media is permanently deleted as soon as you close it.</p>
     </div>
   </div>
 
@@ -557,6 +656,7 @@
   <script src="/js/identity.js"></script>
   <script src="/js/qrcode.js"></script>
   <script src="/js/notifications.js"></script>
+  <script src="/js/config.js"></script>
   <script src="/js/socket.js"></script>
   <script src="/js/webrtc.js"></script>
   <script src="/js/panic.js"></script>
