@@ -1,5 +1,5 @@
 // BitMask Service Worker
-const CACHE_NAME = 'bitmask-v1';
+const CACHE_NAME = 'bitmask-v2';
 const ASSETS = [
   '/',
   '/index.html',
@@ -8,11 +8,12 @@ const ASSETS = [
   '/js/identity.js',
   '/js/qrcode.js',
   '/js/notifications.js',
+  '/js/config.js',
   '/js/socket.js',
   '/js/webrtc.js',
-  '/js/audio.js',
   '/js/panic.js',
-  '/js/app.js'
+  '/js/app.js',
+  '/manifest.json'
 ];
 
 self.addEventListener('install', (e) => {
