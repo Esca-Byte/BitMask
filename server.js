@@ -11,13 +11,30 @@ const rateLimit = require('express-rate-limit');
 const crypto = require('crypto');
 const path = require('path');
 
+const MAX_FILE_SIZE = parseInt(process.env.MAX_FILE_SIZE, 10) || 25 * 1024 * 1024;
+const MAX_FILE_CHUNK_BYTES = 2 * 1024 * 1024;
+const configuredCorsOrigins = (process.env.CORS_ORIGINS || '*')
+  .split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean);
+
 const app = express();
+app.set('trust proxy', 1);
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: '*' },
+  cors: {
+    origin: (origin, callback) => {
+      if (!origin || configuredCorsOrigins.includes('*') || configuredCorsOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('Origin is not allowed by CORS.'));
+      }
+    },
+    methods: ['GET', 'POST'],
+  },
   pingInterval: 25000,
   pingTimeout: 60000,
-  maxHttpBufferSize: 10 * 1024 * 1024, // 10MB for file transfers
+  maxHttpBufferSize: MAX_FILE_CHUNK_BYTES,
 });
 
 // ── Security Middleware ──────────────────────────────────────
@@ -28,8 +45,10 @@ app.use(helmet({
       scriptSrc: ["'self'", "'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
-      connectSrc: ["'self'", "ws:", "wss:"],
-      imgSrc: ["'self'", "data:"],
+      connectSrc: ["'self'", "https:", "ws:", "wss:"],
+      imgSrc: ["'self'", "data:", "blob:"],
+      mediaSrc: ["'self'", "blob:"],
+      objectSrc: ["'none'"],
     },
   },
 }));
@@ -57,6 +76,8 @@ const rooms = new Map();
 const roomCodes = new Map();
 // peerID -> [{ id, from, cipher, nonce, ttl, timestamp }]
 const pendingMessages = new Map();
+// File transfers keep only short-lived metadata in RAM. Encrypted chunks are relayed, never persisted.
+const fileTransfers = new Map();
 // Rate limiting for socket events per IP
 const socketRateMap = new Map();
 
@@ -102,6 +123,13 @@ setInterval(() => {
   }
 }, 300000);
 
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, transfer] of fileTransfers) {
+    if (transfer.expiresAt <= now) fileTransfers.delete(id);
+  }
+}, 60000);
+
 // ── REST Endpoints ───────────────────────────────────────────
 
 app.get('/api/health', (_req, res) => {
@@ -111,7 +139,14 @@ app.get('/api/health', (_req, res) => {
 // ── Socket.io Logic ──────────────────────────────────────────
 
 io.on('connection', (socket) => {
-  const ip = socket.handshake.headers['x-forwarded-for'] || socket.handshake.address;
+  const forwardedFor = socket.handshake.headers['x-forwarded-for'];
+  const ip = typeof forwardedFor === 'string'
+    ? forwardedFor.split(',')[0].trim()
+    : socket.handshake.address;
+
+  socket.on('connection-ping', (_payload, callback) => {
+    callback?.({ timestamp: Date.now() });
+  });
 
   // ── Register Peer ──────────────────────────────────────────
   socket.on('register', ({ peerId, publicKey }, callback) => {
@@ -423,6 +458,142 @@ io.on('connection', (socket) => {
     else pendingMessages.set(peerId, q);
   });
 
+  // ── Chunked Encrypted File Transfer ─────────────────────────
+  // Only encrypted frames cross the server. The server stores transfer
+  // metadata briefly so chunks can be authenticated and routed.
+  socket.on('send-file-start', ({ roomId, metadata, ttl, chunkCount }, callback) => {
+    if (isRateLimited(ip, 45)) {
+      return callback?.({ error: 'Rate limited.' });
+    }
+
+    const myPeerId = socketToPeer.get(socket.id);
+    if (!myPeerId) return callback?.({ error: 'Not registered.' });
+
+    const room = rooms.get(roomId);
+    if (!room) return callback?.({ error: 'Room not found.' });
+    if (!room.members.has(myPeerId)) return callback?.({ error: 'Not a member of this room.' });
+
+    if (
+      !metadata ||
+      typeof metadata.name !== 'string' ||
+      metadata.name.trim().length === 0 ||
+      metadata.name.length > 160 ||
+      !Number.isFinite(Number(metadata.size)) ||
+      Number(metadata.size) < 0
+    ) {
+      return callback?.({ error: 'Invalid file metadata.' });
+    }
+
+    const fileSize = Math.floor(Number(metadata.size));
+    if (fileSize > MAX_FILE_SIZE) {
+      return callback?.({ error: `File too large. Max ${Math.round(MAX_FILE_SIZE / (1024 * 1024))}MB.` });
+    }
+
+    const count = Number(chunkCount);
+    if (!Number.isInteger(count) || count < 1 || count > 128) {
+      return callback?.({ error: 'Invalid file chunk count.' });
+    }
+
+    if (metadata.mimeType !== undefined && (
+      typeof metadata.mimeType !== 'string' || metadata.mimeType.length > 120
+    )) {
+      return callback?.({ error: 'Invalid file type.' });
+    }
+
+    const msgId = generateMessageId();
+    const safeTtl = Math.min(Math.max(ttl || 30000, 5000), 86400000);
+    const safeMetadata = { ...metadata, size: fileSize };
+    fileTransfers.set(msgId, {
+      roomId,
+      from: myPeerId,
+      metadata: safeMetadata,
+      ttl: safeTtl,
+      chunkCount: count,
+      expiresAt: Date.now() + safeTtl,
+    });
+
+    const startMessage = {
+      id: msgId,
+      from: myPeerId,
+      metadata: safeMetadata,
+      ttl: safeTtl,
+      chunkCount: count,
+      timestamp: Date.now(),
+    };
+
+    for (const [pid] of room.members) {
+      if (pid === myPeerId) continue;
+      const target = peers.get(pid);
+      const targetSocket = target && io.sockets.sockets.get(target.socketId);
+      targetSocket?.emit('file-start', startMessage);
+    }
+
+    callback?.({ success: true, msgId });
+  });
+
+  socket.on('send-file-chunk', ({ roomId, msgId, index, cipher, nonce }, callback) => {
+    if (isRateLimited(ip, 180)) {
+      return callback?.({ error: 'Rate limited.' });
+    }
+
+    const myPeerId = socketToPeer.get(socket.id);
+    const transfer = fileTransfers.get(msgId);
+    if (!myPeerId || !transfer) return callback?.({ error: 'File transfer not found.' });
+    if (transfer.roomId !== roomId || transfer.from !== myPeerId) {
+      return callback?.({ error: 'Invalid file transfer.' });
+    }
+
+    const room = rooms.get(roomId);
+    if (!room || !room.members.has(myPeerId)) return callback?.({ error: 'Not a member of this room.' });
+
+    const chunkIndex = Number(index);
+    if (!Number.isInteger(chunkIndex) || chunkIndex < 0 || chunkIndex >= transfer.chunkCount) {
+      return callback?.({ error: 'Invalid file chunk index.' });
+    }
+    if (
+      typeof cipher !== 'string' || cipher.length === 0 || cipher.length > MAX_FILE_CHUNK_BYTES * 2 ||
+      typeof nonce !== 'string' || nonce.length > 64
+    ) {
+      return callback?.({ error: 'Invalid encrypted file chunk.' });
+    }
+
+    for (const [pid] of room.members) {
+      if (pid === myPeerId) continue;
+      const target = peers.get(pid);
+      const targetSocket = target && io.sockets.sockets.get(target.socketId);
+      targetSocket?.emit('file-chunk', {
+        id: msgId,
+        index: chunkIndex,
+        cipher,
+        nonce,
+      });
+    }
+
+    callback?.({ success: true });
+  });
+
+  socket.on('send-file-complete', ({ roomId, msgId }, callback) => {
+    const myPeerId = socketToPeer.get(socket.id);
+    const transfer = fileTransfers.get(msgId);
+    if (!myPeerId || !transfer) return callback?.({ error: 'File transfer not found.' });
+    if (transfer.roomId !== roomId || transfer.from !== myPeerId) {
+      return callback?.({ error: 'Invalid file transfer.' });
+    }
+
+    const room = rooms.get(roomId);
+    if (!room || !room.members.has(myPeerId)) return callback?.({ error: 'Not a member of this room.' });
+
+    for (const [pid] of room.members) {
+      if (pid === myPeerId) continue;
+      const target = peers.get(pid);
+      const targetSocket = target && io.sockets.sockets.get(target.socketId);
+      targetSocket?.emit('file-complete', { id: msgId });
+    }
+
+    fileTransfers.delete(msgId);
+    callback?.({ success: true });
+  });
+
   // ── Send Encrypted File ──────────────────────────────────
   socket.on('send-file', ({ roomId, cipher, nonce, metadata, ttl }, callback) => {
     if (isRateLimited(ip, 30)) {
@@ -439,13 +610,27 @@ io.on('connection', (socket) => {
       return callback?.({ error: 'Not a member of this room.' });
     }
 
-    // Validate metadata
-    if (!metadata || !metadata.name || !metadata.size) {
+    // Validate metadata before relaying the encrypted payload.
+    if (
+      !metadata ||
+      typeof metadata.name !== 'string' ||
+      metadata.name.trim().length === 0 ||
+      metadata.name.length > 160 ||
+      !Number.isFinite(Number(metadata.size)) ||
+      Number(metadata.size) < 0
+    ) {
       return callback?.({ error: 'Invalid file metadata.' });
     }
 
-    if (metadata.size > 5 * 1024 * 1024) {
-      return callback?.({ error: 'File too large. Max 5MB.' });
+    const fileSize = Math.floor(Number(metadata.size));
+    if (fileSize > MAX_FILE_SIZE) {
+      return callback?.({ error: `File too large. Max ${Math.round(MAX_FILE_SIZE / (1024 * 1024))}MB.` });
+    }
+
+    if (metadata.mimeType !== undefined && (
+      typeof metadata.mimeType !== 'string' || metadata.mimeType.length > 120
+    )) {
+      return callback?.({ error: 'Invalid file type.' });
     }
 
     const msgId = generateMessageId();
@@ -455,7 +640,7 @@ io.on('connection', (socket) => {
       from: myPeerId,
       cipher,
       nonce,
-      metadata,
+      metadata: { ...metadata, size: fileSize },
       ttl: Math.min(Math.max(ttl || 30000, 5000), 86400000),
       timestamp: Date.now(),
     };
@@ -501,7 +686,8 @@ io.on('connection', (socket) => {
     const room = rooms.get(roomId);
     if (!room) return;
 
-    if (!room.members.has(myPeerId)) return;
+    if (!room.members.has(myPeerId) || !room.members.has(targetPeerId)) return;
+    if (!signal || typeof signal.type !== 'string' || signal.type.length > 32) return;
 
     const target = peers.get(targetPeerId);
     if (target) {
@@ -531,6 +717,9 @@ io.on('connection', (socket) => {
     if (myPeer) myPeer.connectedTo = null;
 
     pendingMessages.delete(myPeerId);
+    for (const [transferId, transfer] of fileTransfers) {
+      if (transfer.from === myPeerId) fileTransfers.delete(transferId);
+    }
 
     if (room.isGroup) {
       // Notify remaining members
@@ -633,6 +822,9 @@ io.on('connection', (socket) => {
     peers.delete(peerId);
     socketToPeer.delete(socket.id);
     pendingMessages.delete(peerId);
+    for (const [transferId, transfer] of fileTransfers) {
+      if (transfer.from === peerId) fileTransfers.delete(transferId);
+    }
     console.log(`[-] Peer disconnected: ${peerId.slice(0, 6)}...`);
   });
 });
@@ -646,6 +838,6 @@ server.listen(PORT, () => {
   console.log(`  ██╔══██╗██║   ██║   ██║╚██╔╝██║██╔══██║╚════██║██╔═██╗ `);
   console.log(`  ██████╔╝██║   ██║   ██║ ╚═╝ ██║██║  ██║███████║██║  ██╗`);
   console.log(`  ╚═════╝ ╚═╝   ╚═╝   ╚═╝     ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝`);
-  console.log(`\n  🔒 Anonymous encrypted chat running on port ${PORT}`);
+  console.log(`\n  Anonymous encrypted chat running on port ${PORT}`);
   console.log(`  → http://localhost:${PORT}\n`);
 });

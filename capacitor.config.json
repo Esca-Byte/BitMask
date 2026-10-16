@@ -1,0 +1,16 @@
+{
+  "appId": "com.bitmask.chat",
+  "appName": "BitMask",
+  "webDir": "public",
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchAutoHide": true,
+      "launchShowDuration": 0,
+      "backgroundColor": "#080b12",
+      "showSpinner": false
+    }
+  }
+}

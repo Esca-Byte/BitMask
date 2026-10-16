@@ -10,6 +10,9 @@ class BitMaskCallController {
     this.targetPeerId = null;
     this.callType = null; // 'voice' or 'video'
     this.isCallActive = false;
+    this.callId = null;
+    this.callState = 'idle'; // idle | requesting | outgoing-ringing | incoming | connecting | connected
+    this.incomingTimeout = null;
     this.isMuted = false;
     this.isCameraOff = false;
     this.audioContext = null;
@@ -22,6 +25,36 @@ class BitMaskCallController {
         { urls: 'stun:stun1.l.google.com:19302' }
       ]
     };
+  }
+
+  createCallId() {
+    if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+    const bytes = window.crypto.getRandomValues(new Uint8Array(12));
+    return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+  }
+
+  isCallInProgress() {
+    return this.callState !== 'idle' || Boolean(this.callId || this.incomingTimeout);
+  }
+
+  clearIncomingTimeout() {
+    if (this.incomingTimeout) clearTimeout(this.incomingTimeout);
+    this.incomingTimeout = null;
+  }
+
+  setCallState(state) {
+    this.callState = state;
+    const badge = document.querySelector('.call-badge');
+    if (!badge) return;
+    const labels = {
+      requesting: 'REQUESTING CALL',
+      'outgoing-ringing': 'CALLING',
+      incoming: 'INCOMING CALL',
+      connecting: 'CONNECTING',
+      connected: 'CALL ACTIVE',
+      idle: 'CALL ENDED',
+    };
+    badge.textContent = labels[state] || 'CALL';
   }
 
   // ── Procedural Sound Ringing Synthesizer ───────────────────
@@ -104,11 +137,13 @@ class BitMaskCallController {
 
   // ── Initiate Outgoing Call ─────────────────────────────────
   async startCall(roomId, targetPeerId, type) {
-    if (this.isCallActive) return;
+    if (this.isCallInProgress()) return;
 
     this.roomId = roomId;
     this.targetPeerId = targetPeerId;
     this.callType = type;
+    this.callId = this.createCallId();
+    this.setCallState('requesting');
     this.isMuted = false;
     this.isCameraOff = false;
 
@@ -132,7 +167,15 @@ class BitMaskCallController {
       return;
     }
 
+    // A user may cancel while the browser permission prompt is open.
+    if (this.callState !== 'requesting' || !this.callId) {
+      this.localStream?.getTracks().forEach(track => track.stop());
+      this.localStream = null;
+      return;
+    }
+
     // Show floating call view overlay
+    this.setCallState('outgoing-ringing');
     this.updateUIForCallingState();
 
     // Synthesize call ringing indicator
@@ -141,21 +184,38 @@ class BitMaskCallController {
     // Signal remote target peer about outgoing call request
     BitMaskSocket.sendCallSignal(this.roomId, this.targetPeerId, {
       type: 'offer-request',
+      callId: this.callId,
       callType: this.callType // Use dynamic resolved callType (might have fallen back to voice)
     });
+
+    this.clearIncomingTimeout();
+    const activeCallId = this.callId;
+    this.incomingTimeout = setTimeout(() => {
+      if (this.callState === 'outgoing-ringing' && this.callId === activeCallId) {
+        showToast('No answer. Call ended.', 'info');
+        this.hangup(true);
+      }
+    }, 30000);
   }
 
   // ── Receive Incoming Call Request ──────────────────────────
   handleIncomingCallRequest(roomId, fromPeerId, signal) {
-    if (this.isCallActive) {
-      // Auto-decline if already in a call
-      BitMaskSocket.sendCallSignal(roomId, fromPeerId, { type: 'reject' });
+    const incomingCallId = signal.callId || this.createCallId();
+    if (this.isCallInProgress()) {
+      // Tell the new caller why the request cannot be shown. This prevents
+      // callers from ringing forever when the recipient is already busy.
+      BitMaskSocket.sendCallSignal(roomId, fromPeerId, {
+        type: 'busy',
+        callId: incomingCallId,
+      });
       return;
     }
 
     this.roomId = roomId;
     this.targetPeerId = fromPeerId;
     this.callType = signal.callType || 'voice';
+    this.callId = incomingCallId;
+    this.setCallState('incoming');
 
     // Pulse incoming call sound
     this.startRingingTone();
@@ -169,13 +229,15 @@ class BitMaskCallController {
 
     const isVideo = this.callType === 'video';
     const typeLabel = isVideo ? 'Video Call' : 'Voice Call';
-    const typeIcon = isVideo ? '📹' : '📞';
+    const typeIcon = isVideo
+      ? '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 7l-7 5 7 5V7Z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>'
+      : '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.1 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7 12.8 12.8 0 0 0 .7 2.8 2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5 12.8 12.8 0 0 0 2.8.7 2 2 0 0 1 1.7 2.1Z"/></svg>';
 
     if (titleEl) {
       titleEl.textContent = `Incoming ${typeLabel}...`;
     }
     if (avatarEl) {
-      avatarEl.textContent = typeIcon;
+      avatarEl.innerHTML = typeIcon;
     }
     if (descEl) {
       descEl.innerHTML = `Peer <span id="incoming-caller-id">${fromPeerId.slice(0, 6)}...</span> is requesting an encrypted <strong>${typeLabel}</strong>.`;
@@ -186,12 +248,22 @@ class BitMaskCallController {
     if (modal) {
       modal.classList.remove('hidden');
     }
+
+    this.clearIncomingTimeout();
+    this.incomingTimeout = setTimeout(() => {
+      if (this.callState === 'incoming' && this.callId === incomingCallId) {
+        this.rejectIncomingCall('timeout');
+      }
+    }, 30000);
   }
 
   // ── Accept Incoming Call ───────────────────────────────────
   async acceptIncomingCall() {
+    if (this.callState !== 'incoming' || !this.callId) return;
     this.stopRingingTone();
+    this.clearIncomingTimeout();
     document.getElementById('incoming-call-modal').classList.add('hidden');
+    this.setCallState('connecting');
 
     try {
       const constraints = {
@@ -210,6 +282,12 @@ class BitMaskCallController {
       return;
     }
 
+    if (this.callState !== 'connecting' || !this.callId) {
+      this.localStream?.getTracks().forEach(track => track.stop());
+      this.localStream = null;
+      return;
+    }
+
     // Display frosted calling card overlay
     this.updateUIForCallingState();
 
@@ -223,6 +301,7 @@ class BitMaskCallController {
 
       BitMaskSocket.sendCallSignal(this.roomId, this.targetPeerId, {
         type: 'offer',
+        callId: this.callId,
         sdp: offer
       });
     } catch (err) {
@@ -232,11 +311,18 @@ class BitMaskCallController {
   }
 
   // ── Reject Incoming Call ───────────────────────────────────
-  rejectIncomingCall() {
+  rejectIncomingCall(reason = 'rejected') {
     this.stopRingingTone();
+    this.clearIncomingTimeout();
     document.getElementById('incoming-call-modal').classList.add('hidden');
 
-    BitMaskSocket.sendCallSignal(this.roomId, this.targetPeerId, { type: 'reject' });
+    if (this.roomId && this.targetPeerId && this.callId) {
+      BitMaskSocket.sendCallSignal(this.roomId, this.targetPeerId, {
+        type: 'reject',
+        callId: this.callId,
+        reason,
+      });
+    }
 
     this.resetState();
   }
@@ -244,6 +330,7 @@ class BitMaskCallController {
   // ── Setup Peer Connection & Streams ────────────────────────
   setupPeerConnection() {
     this.isCallActive = true;
+    this.setCallState('connecting');
     this.peerConnection = new RTCPeerConnection(this.rtcConfig);
 
     // Bind ICE candidates routing
@@ -251,8 +338,21 @@ class BitMaskCallController {
       if (event.candidate) {
         BitMaskSocket.sendCallSignal(this.roomId, this.targetPeerId, {
           type: 'candidate',
+          callId: this.callId,
           candidate: event.candidate
         });
+      }
+    };
+
+    this.peerConnection.onconnectionstatechange = () => {
+      if (this.callState === 'idle') return;
+      const state = this.peerConnection?.connectionState;
+      if (state === 'connected') {
+        this.setCallState('connected');
+        this.stopRingingTone();
+        this.clearIncomingTimeout();
+      } else if (['failed', 'disconnected', 'closed'].includes(state)) {
+        this.hangup(state !== 'closed');
       }
     };
 
@@ -285,6 +385,8 @@ class BitMaskCallController {
   // ── Handle Relayed WebSocket Signals ───────────────────────
   async handleIncomingSignal(fromPeerId, signal) {
     if (fromPeerId !== this.targetPeerId) return;
+    if (signal.callId && this.callId && signal.callId !== this.callId) return;
+    if (signal.callId && !this.callId) this.callId = signal.callId;
 
     switch (signal.type) {
       case 'offer':
@@ -297,6 +399,7 @@ class BitMaskCallController {
 
           BitMaskSocket.sendCallSignal(this.roomId, this.targetPeerId, {
             type: 'answer',
+            callId: this.callId,
             sdp: answer
           });
         } catch (err) {
@@ -308,6 +411,7 @@ class BitMaskCallController {
       case 'answer':
         console.log("[Call] WebRTC Answer signal received.");
         this.stopRingingTone();
+        this.clearIncomingTimeout();
         if (this.peerConnection) {
           try {
             await this.peerConnection.setRemoteDescription(new RTCSessionDescription(signal.sdp));
@@ -330,8 +434,18 @@ class BitMaskCallController {
 
       case 'reject':
         console.log("[Call] Ring request rejected by remote peer.");
-        showToast("Call declined by peer.", "info");
+        showToast(signal.reason === 'timeout' ? "Call timed out." : "Call declined by peer.", "info");
         this.hangup(false);
+        break;
+
+      case 'busy':
+        showToast("Peer is already on another call.", "info");
+        this.hangup(false);
+        break;
+
+      case 'cancel':
+        showToast("Call canceled.", "info");
+        this.resetState();
         break;
 
       case 'hangup':
@@ -388,9 +502,14 @@ class BitMaskCallController {
   hangup(notifyRemote = true) {
     console.log("[Call] Hanging up call.");
     this.stopRingingTone();
+    this.clearIncomingTimeout();
 
-    if (notifyRemote && this.roomId && this.targetPeerId) {
-      BitMaskSocket.sendCallSignal(this.roomId, this.targetPeerId, { type: 'hangup' });
+    if (notifyRemote && this.roomId && this.targetPeerId && this.callId) {
+      const signalType = ['requesting', 'outgoing-ringing'].includes(this.callState) ? 'cancel' : 'hangup';
+      BitMaskSocket.sendCallSignal(this.roomId, this.targetPeerId, {
+        type: signalType,
+        callId: this.callId,
+      });
     }
 
     this.resetState();
@@ -398,6 +517,7 @@ class BitMaskCallController {
 
   resetState() {
     this.stopRingingTone();
+    this.clearIncomingTimeout();
     this.stopVoiceWaveAnimation();
 
     if (this.localStream) {
@@ -429,9 +549,15 @@ class BitMaskCallController {
     this.roomId = null;
     this.targetPeerId = null;
     this.callType = null;
+    this.callId = null;
     this.isCallActive = false;
+    this.setCallState('idle');
     this.isMuted = false;
     this.isCameraOff = false;
+  }
+
+  handleTransportDisconnect() {
+    this.resetState();
   }
 
   // ── Dynamic Call UI state managers ─────────────────────────

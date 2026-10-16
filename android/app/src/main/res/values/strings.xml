@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">BitMask</string>
+    <string name="title_activity_main">BitMask</string>
+    <string name="package_name">com.bitmask.chat</string>
+    <string name="custom_url_scheme">com.bitmask.chat</string>
+</resources>

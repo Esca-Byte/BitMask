@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: bitmask
+    runtime: node
+    plan: starter
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: MAX_FILE_SIZE
+        value: "26214400"
+      - key: CORS_ORIGINS
+        value: "https://bitmask-lpf2.onrender.com,capacitor://localhost,https://localhost"

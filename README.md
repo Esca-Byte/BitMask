@@ -5,7 +5,7 @@
   <img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" />
 </p>
 
-<h1 align="center">🎭 BitMask</h1>
+<h1 align="center">BitMask</h1>
 <p align="center"><strong>Anonymous. Encrypted. Ephemeral.</strong></p>
 <p align="center">A zero-knowledge, end-to-end encrypted chat platform with self-destructing messages.<br/>No accounts. No logs. No trace.</p>
 
@@ -15,17 +15,20 @@
 
 | Feature | Description |
 |---------|-------------|
-| **🔒 End-to-End Encryption** | ECDH P-256 key exchange + AES-256-GCM. The server relays ciphertext it cannot decrypt. |
-| **💨 Self-Destructing Messages** | Every message has a TTL (5s → 24h). Countdown is visible. At zero, it's gone forever. |
-| **📂 Encrypted File Sharing** | Send images and files up to 5 MB — all encrypted before leaving your device. |
+| **End-to-End Encryption** | ECDH P-256 key exchange + AES-256-GCM. The server relays ciphertext it cannot decrypt. |
+| **Self-Destructing Messages** | Every message has a TTL (5s → 24h). Countdown is visible. At zero, it's gone forever. |
+| **Encrypted File Sharing** | Send images and files up to 25 MB — all encrypted before leaving your device. Transfers are chunked and held only in volatile memory while relaying. |
+| **Media-first Composer** | Paste screenshots, drag files into the composer, optimize images locally before encryption, or open encrypted previews in a local lightbox. |
 | **🆔 Persistent Identity** | Optionally "Remember" your Peer ID across sessions with a single toggle. |
-| **🔐 Passphrase Lock** | Lock your identity with a passphrase. It's encrypted locally — we never see it. |
+| **Passphrase Lock** | Lock your identity with a passphrase. It's encrypted locally — we never see it. |
 | **📤 Export / Import** | Download your identity as an encrypted `.bitmask` file. Restore it on any device. |
 | **📱 QR Code** | Generate a QR code of your Peer ID for easy sharing. Fully offline, zero dependencies. |
-| **👥 Group Rooms** | Create encrypted rooms for 3+ peers. Share a 6-char code and everyone's in — up to 20 members. |
-| **🔔 Sound Notifications** | Web Audio API synthesized sounds for messages, connections, and self-destruct events. |
-| **👻 Zero Knowledge** | No accounts, no databases, no cookies, no analytics. Server state lives in RAM only. |
-| **⚡ Real-Time** | WebSocket-powered via Socket.io with typing indicators and instant delivery. |
+| **Group Rooms** | Create encrypted rooms for 3+ peers. Share a 6-char code and everyone's in — up to 20 members. |
+| **Sound Notifications** | Web Audio API synthesized sounds for messages, connections, and self-destruct events. |
+| **Zero Knowledge** | No accounts, no databases, no cookies, no analytics. Server state lives in RAM only. |
+| **Real-Time** | WebSocket-powered via Socket.io with typing indicators, connection quality, and instant delivery. |
+| **Ephemeral Actions** | Encrypted replies and short-lived reactions disappear with the message session. |
+| **QR Scanner** | Scan a peer ID or room invite with a mobile camera, or choose a QR image from the device. |
 
 ## Screenshots
 
@@ -109,9 +112,11 @@ Create a `.env` file in the root directory:
 PORT=3000
 RATE_LIMIT_WINDOW_MS=900000
 RATE_LIMIT_MAX_REQUESTS=100
+MAX_FILE_SIZE=26214400
+CORS_ORIGINS=https://YOUR-RENDER-SERVICE.onrender.com,capacitor://localhost,https://localhost
 ```
 
-All variables are optional — sensible defaults are built in.
+All variables are optional — sensible defaults are built in. Set `CORS_ORIGINS` to your real web origin plus `capacitor://localhost` and `https://localhost` for a production Android APK.
 
 ## Project Structure
 
@@ -155,10 +160,13 @@ Every message and file is encrypted client-side with **AES-256-GCM** — using t
 Each message carries a TTL chosen by the sender. All recipients run a countdown timer. At zero, the message DOM element is destroyed, and the plaintext is garbage-collected. The server purges any queued copy on TTL expiry or read-acknowledgment.
 
 ### 5. File Sharing
-Files (up to 5 MB) are read as `ArrayBuffer`, encrypted with AES-256-GCM, and sent via Socket.io. Recipients decrypt and render them — images get inline previews, other files get a download button. Works in both 1:1 and group mode.
+Files (up to 25 MB) are read as `ArrayBuffer`, encrypted chunk-by-chunk with AES-256-GCM, and sent via Socket.io. Recipients decrypt and render them locally — images get resilient inline previews and a local lightbox, while other files get a download button. Images can be attached, pasted, or dragged into the composer and are optionally resized and compressed locally before encryption. Blob URLs are revoked when media self-destructs, and the server CSP explicitly permits only local encrypted media previews. Works in both 1:1 and group mode.
 
 ### 6. Group Rooms
 Create a room → get a **6-character room code** → share it → others join. The host generates and distributes an AES-256 group key encrypted per-member via ECDH. Up to **20 members** per room. Automatic host transfer if the host leaves. Sender labels, multi-peer typing indicators, and member list are all included.
+
+### 7. Ephemeral Replies & Reactions
+Text payloads support encrypted reply references and short-lived text reactions. They travel over the same encrypted message channel, are never stored separately, and disappear with the message session.
 
 ## Security Design
 
@@ -202,7 +210,7 @@ Returns `{ status: "ok", uptime: <seconds> }`.
 | `join-room` | Client → Server | Join a group room by code |
 | `distribute-key` | Client → Server | Host sends encrypted group key to a peer |
 | `send-message` | Client → Server | Send encrypted message (1:1 or group) |
-| `send-file` | Client → Server | Send encrypted file (max 5 MB) |
+| `send-file-start`, `send-file-chunk`, `send-file-complete` | Client → Server | Relay encrypted file chunks (max 25 MB) |
 | `typing` | Client → Server | Typing indicator toggle |
 | `leave-room` | Client → Server | Leave current chat room |
 | `peer-connected` | Server → Client | Incoming 1:1 peer connection |
@@ -213,9 +221,15 @@ Returns `{ status: "ok", uptime: <seconds> }`.
 | `host-changed` | Server → Client | Group host transferred to new member |
 | `message` | Server → Client | Incoming encrypted message |
 | `file` | Server → Client | Incoming encrypted file |
+| `file-start`, `file-chunk`, `file-complete` | Server → Client | Incoming encrypted file chunks |
 | `typing` | Server → Client | Peer typing status |
+| `connection-ping` | Client → Server | Measure current relay latency |
 
 ## Deployment
+
+### Android APK
+
+BitMask now includes a Capacitor Android project. The APK bundles the local web interface and connects to the Render-hosted Node.js/Socket.IO relay over HTTPS/WSS. See [ANDROID.md](ANDROID.md) for Render variables, backend URL configuration, Android Studio requirements, signing, and release commands.
 
 ### Deploy to Railway / Render / Fly.io
 
@@ -263,6 +277,6 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
 ---
 
 <p align="center">
-  <strong>🎭 BitMask</strong> — Because privacy is not a privilege. It's a right.
+  <strong>BitMask</strong> — Because privacy is not a privilege. It's a right.
 </p>
 #
