@@ -1,5 +1,5 @@
 // BitMask Service Worker
-const CACHE_NAME = 'bitmask-v2';
+const CACHE_NAME = 'bitmask-v3';
 const ASSETS = [
   '/',
   '/index.html',
@@ -17,6 +17,7 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', (e) => {
+  self.skipWaiting();
   e.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
   );
@@ -30,7 +31,7 @@ self.addEventListener('activate', (e) => {
           if (key !== CACHE_NAME) return caches.delete(key);
         })
       )
-    )
+    ).then(() => self.clients.claim())
   );
 });
 

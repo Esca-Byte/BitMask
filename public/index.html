@@ -282,10 +282,10 @@
   </div>
 
   <!-- ── QR Scanner Modal ──────────────────────────────────── -->
-  <div id="qr-scanner-modal" class="modal hidden" aria-hidden="true">
+  <div id="qr-scanner-modal" class="modal qr-scanner-modal hidden" aria-hidden="true">
     <div class="modal-backdrop"></div>
     <div class="modal-content qr-scanner-modal-content" role="dialog" aria-modal="true" aria-labelledby="qr-scanner-title">
-      <div class="modal-header">
+      <div class="modal-header qr-scanner-header">
         <div>
           <span class="modal-kicker">Mobile connection</span>
           <h3 id="qr-scanner-title">Scan a QR code</h3>
@@ -301,8 +301,10 @@
         </div>
         <div class="qr-scanner-corners" aria-hidden="true"></div>
       </div>
-      <p id="qr-scanner-status" class="qr-scanner-status" role="status">Starting scanner…</p>
-      <p class="qr-scanner-hint">Scanning starts automatically. A valid peer or room code connects immediately.</p>
+      <div class="qr-scanner-footer">
+        <p id="qr-scanner-status" class="qr-scanner-status" role="status">Starting scanner…</p>
+        <p class="qr-scanner-hint">Scanning starts automatically. A valid peer or room code connects immediately.</p>
+      </div>
     </div>
   </div>
 
