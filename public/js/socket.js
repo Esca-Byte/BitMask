@@ -5,6 +5,7 @@
 const BitMaskSocket = (() => {
   let socket = null;
   let handlers = {};
+  let registeredPeerId = null;
 
   function connect() {
     if (socket?.connected || socket?.active) return;
@@ -26,6 +27,7 @@ const BitMaskSocket = (() => {
 
     socket.on('disconnect', (reason) => {
       console.log('[BitMask] Disconnected:', reason);
+      registeredPeerId = null;
       handlers.onDisconnect?.(reason);
     });
 
@@ -92,40 +94,61 @@ const BitMaskSocket = (() => {
     return new Promise((resolve, reject) => {
       if (!socket) return reject(new Error('Not connected'));
       socket.emit('register', { peerId, publicKey }, (res) => {
-        if (res.error) reject(new Error(res.error));
-        else resolve(res);
+        if (res?.error) reject(new Error(res.error));
+        else {
+          registeredPeerId = peerId;
+          resolve(res);
+        }
       });
+    });
+  }
+
+  function waitForReady(timeoutMs = 10000) {
+    if (socket?.connected && registeredPeerId) return Promise.resolve();
+    if (!socket) connect();
+
+    return new Promise((resolve, reject) => {
+      const startedAt = Date.now();
+      const check = () => {
+        if (socket?.connected && registeredPeerId) {
+          resolve();
+          return;
+        }
+        if (Date.now() - startedAt >= timeoutMs) {
+          reject(new Error('Secure connection is still starting. Please try scanning again.'));
+          return;
+        }
+        setTimeout(check, 50);
+      };
+      check();
     });
   }
 
   function connectToPeer(targetPeerId) {
-    return new Promise((resolve, reject) => {
-      if (!socket) return reject(new Error('Not connected'));
+    return waitForReady().then(() => new Promise((resolve, reject) => {
       socket.emit('connect-to-peer', { targetPeerId }, (res) => {
-        if (res.error) reject(new Error(res.error));
+        if (res?.error) reject(new Error(res.error));
         else resolve(res);
       });
-    });
+    }));
   }
 
   function createRoom() {
-    return new Promise((resolve, reject) => {
-      if (!socket) return reject(new Error('Not connected'));
+    return waitForReady().then(() => new Promise((resolve, reject) => {
       socket.emit('create-room', {}, (res) => {
-        if (res.error) reject(new Error(res.error));
+        if (res?.error) reject(new Error(res.error));
         else resolve(res);
       });
-    });
+    }));
   }
 
   function joinRoom(roomCode) {
-    return new Promise((resolve, reject) => {
-      if (!socket) return reject(new Error('Not connected'));
+    return waitForReady().then(() => new Promise((resolve, reject) => {
       socket.emit('join-room', { roomCode }, (res) => {
-        if (res.error) reject(new Error(res.error));
+        if (res?.error) reject(new Error(res.error));
         else resolve(res);
       });
-    });
+    }));
   }
 
   function distributeKey(roomId, targetPeerId, encryptedKey, nonce) {
@@ -161,6 +184,7 @@ const BitMaskSocket = (() => {
     socket.removeAllListeners();
     socket.disconnect();
     socket = null;
+    registeredPeerId = null;
     handlers = {};
   }
 
@@ -234,6 +258,7 @@ const BitMaskSocket = (() => {
 
   return {
     connect,
+    waitForReady,
     register,
     connectToPeer,
     createRoom,

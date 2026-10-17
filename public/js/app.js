@@ -430,7 +430,12 @@ const BitMaskApp = (() => {
 
     // ── QR Code ──
     $('#qr-btn').addEventListener('click', () => {
-      const svg = BitMaskQR.toSVG(peerId, { moduleSize: 6, margin: 2 });
+      const svg = BitMaskQR.toSVG(peerId, {
+        size: 360,
+        margin: 4,
+        darkColor: '#07111f',
+        lightColor: '#ffffff',
+      });
       $('#qr-container').innerHTML = svg;
       $('#qr-peer-id').textContent = formatPeerId(peerId);
       openModal('qr-modal');
@@ -441,7 +446,7 @@ const BitMaskApp = (() => {
       navigator.clipboard.writeText(peerId).then(() => {
         const btn = $('#qr-copy-btn');
         btn.textContent = 'Copied!';
-        setTimeout(() => btn.textContent = 'Copy ID', 1500);
+        setTimeout(() => btn.textContent = 'Copy peer ID', 1500);
       });
     });
 
@@ -1925,11 +1930,20 @@ const BitMaskApp = (() => {
     if (result.kind === 'peer') {
       $('#target-peer-input').value = result.value;
       showToast('Peer ID scanned. Connecting…', 'success');
-      $('#connect-form').requestSubmit();
+      submitForm($('#connect-form'));
     } else {
       $('#room-code-input').value = result.value;
       showToast('Room code scanned. Joining…', 'success');
-      $('#join-group-form').requestSubmit();
+      submitForm($('#join-group-form'));
+    }
+  }
+
+  function submitForm(form) {
+    if (!form) return;
+    if (typeof form.requestSubmit === 'function') {
+      form.requestSubmit();
+    } else {
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     }
   }
 
@@ -2192,7 +2206,7 @@ const BitMaskApp = (() => {
         $('#room-code-input').value = code.toUpperCase();
         showToast(`Auto-joining room ${code.toUpperCase()} from invite link...`, 'info');
         setTimeout(() => {
-          $('#join-group-form').dispatchEvent(new Event('submit', { cancelable: true }));
+          submitForm($('#join-group-form'));
         }, 600);
       }
     } else if (hash.startsWith('#peer=')) {
@@ -2201,7 +2215,7 @@ const BitMaskApp = (() => {
         $('#target-peer-input').value = pid.toUpperCase();
         showToast(`Connecting to peer ${pid.toUpperCase()}...`, 'info');
         setTimeout(() => {
-          $('#connect-form').dispatchEvent(new Event('submit', { cancelable: true }));
+          submitForm($('#connect-form'));
         }, 600);
       }
     }

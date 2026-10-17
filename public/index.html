@@ -265,19 +265,24 @@
   <!-- ── QR Modal ─────────────────────────────────────────── -->
   <div id="qr-modal" class="modal hidden">
     <div class="modal-backdrop"></div>
-    <div class="modal-content qr-modal-content">
-      <button class="modal-close-btn qr-close-btn">&times;</button>
-      <div class="qr-card">
-        <div class="qr-card-inner">
-          <div id="qr-container" class="qr-container"></div>
-        </div>
+    <div class="modal-content peer-qr-modal-content" role="dialog" aria-modal="true" aria-labelledby="qr-modal-title">
+      <div class="qr-modal-header">
+        <div class="qr-modal-kicker"><span class="qr-live-dot"></span> Private connection</div>
+        <button class="modal-close-btn qr-close-btn" type="button" aria-label="Close QR code">&times;</button>
+      </div>
+      <h3 id="qr-modal-title">Scan to connect</h3>
+      <p class="qr-modal-desc">Let another BitMask user scan this code to start an encrypted chat with you.</p>
+      <div class="qr-card" aria-label="Your BitMask peer QR code">
+        <div id="qr-container" class="qr-container"></div>
       </div>
       <div class="qr-info">
         <div class="qr-label">YOUR PEER ID</div>
         <code id="qr-peer-id" class="qr-peer-text">----</code>
-        <button id="qr-copy-btn" class="btn btn-ghost qr-copy-btn">Copy ID</button>
       </div>
-      <p class="qr-hint">Let others scan this to connect with you</p>
+      <div class="qr-modal-actions">
+        <button id="qr-copy-btn" class="btn btn-primary qr-copy-btn" type="button">Copy peer ID</button>
+      </div>
+      <p class="qr-hint"><span aria-hidden="true">▣</span> Keep this code visible while the other person scans.</p>
     </div>
   </div>
 

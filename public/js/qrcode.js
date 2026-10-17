@@ -322,7 +322,10 @@ const BitMaskQR = (() => {
 
     // Around top-left finder
     const bits = [];
-    for (let i = 14; i >= 0; i--) bits.push((info >> i) & 1);
+    // QR format information is written least-significant bit first.
+    // Reversing these bits produces a visually plausible code that
+    // scanners can locate but cannot decode.
+    for (let i = 0; i < 15; i++) bits.push((info >> i) & 1);
 
     const positions1 = [
       [0, 8], [1, 8], [2, 8], [3, 8], [4, 8], [5, 8], [7, 8], [8, 8],
@@ -405,8 +408,8 @@ const BitMaskQR = (() => {
     const {
       size = 200,
       margin = 4,
-      darkColor = '#e8e8ed',
-      lightColor = '#0a0a0f',
+      darkColor = '#07111f',
+      lightColor = '#ffffff',
     } = options;
 
     const matrix = encode(text);
@@ -414,14 +417,14 @@ const BitMaskQR = (() => {
     const cellSize = (size - margin * 2) / modules;
 
     let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">`;
-    svg += `<rect width="${size}" height="${size}" fill="${lightColor}" rx="8"/>`;
+    svg += `<rect width="${size}" height="${size}" fill="${lightColor}"/>`;
 
     for (let r = 0; r < modules; r++) {
       for (let c = 0; c < modules; c++) {
         if (matrix[r][c] === 1) {
           const x = margin + c * cellSize;
           const y = margin + r * cellSize;
-          svg += `<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${(cellSize + 0.5).toFixed(2)}" height="${(cellSize + 0.5).toFixed(2)}" fill="${darkColor}" rx="1"/>`;
+          svg += `<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${cellSize.toFixed(2)}" height="${cellSize.toFixed(2)}" fill="${darkColor}"/>`;
         }
       }
     }
@@ -436,8 +439,8 @@ const BitMaskQR = (() => {
     const {
       size = 200,
       margin = 4,
-      darkColor = '#e8e8ed',
-      lightColor = '#0a0a0f',
+      darkColor = '#07111f',
+      lightColor = '#ffffff',
     } = options;
 
     canvas.width = size;
