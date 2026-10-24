@@ -2163,7 +2163,7 @@ const BitMaskApp = (() => {
       const avatar = document.createElement('div');
       avatar.className = 'member-avatar';
       const colorIdx = peerColor(pid);
-      const colors = ['#6C63FF','#E040FB','#4ADE80','#FBBF24','#F87171','#60A5FA','#34D399','#FB923C','#A78BFA','#F472B6'];
+      const colors = ['#6F4E37','#B5EAE2','#E8E0FD','#8BCFC5','#C99B78','#D8CFF0','#9ECFC7','#A67C5B','#B9A9DF','#E0B6A0'];
       avatar.style.background = colors[colorIdx];
       avatar.textContent = pid.slice(0, 2);
 

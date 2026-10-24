@@ -3,18 +3,23 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>BitMask — Anonymous Encrypted Chat</title>
-  <meta name="description" content="Anonymous, end-to-end encrypted, self-destructing chat. No accounts. No logs. No trace." />
+  <title>BitMask — Private conversations, without the trail</title>
+  <meta name="description" content="BitMask is an end-to-end encrypted chat space with ephemeral messages, private identities, QR invites, and no accounts." />
+  <meta name="theme-color" content="#08111f" />
+  <meta property="og:title" content="BitMask — Private conversations, without the trail" />
+  <meta property="og:description" content="End-to-end encrypted, ephemeral chat with no accounts and no message database." />
+  <meta property="og:type" content="website" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/css/style.css" />
+  <link rel="stylesheet" href="/css/app-redesign.css" />
   <link rel="manifest" href="/manifest.json" />
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='24' fill='%237785ff'/%3E%3Ccircle cx='34' cy='44' r='8' fill='white'/%3E%3Ccircle cx='66' cy='44' r='8' fill='white'/%3E%3Cpath d='M25 63c15 14 35 14 50 0' fill='none' stroke='white' stroke-width='7' stroke-linecap='round'/%3E%3C/svg%3E" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='24' fill='%236F4E37'/%3E%3Ccircle cx='34' cy='44' r='8' fill='%23B5EAE2'/%3E%3Ccircle cx='66' cy='44' r='8' fill='%23B5EAE2'/%3E%3Cpath d='M25 63c15 14 35 14 50 0' fill='none' stroke='%23E8E0FD' stroke-width='7' stroke-linecap='round'/%3E%3C/svg%3E" />
 </head>
 <body>
 
-  <a class="skip-link" href="#message-input">Skip to chat input</a>
+  <a class="skip-link" href="#app-main">Skip to main content</a>
 
   <!-- Ambient background glow elements -->
   <div class="ambient-glow glow-1"></div>
@@ -22,10 +27,12 @@
   <div class="ambient-glow glow-3"></div>
 
   <!-- ── Toast Container ──────────────────────────────────── -->
-  <div id="toast-container"></div>
+  <div id="toast-container" role="status" aria-live="polite" aria-atomic="true"></div>
+
+  <main id="app-main">
 
   <!-- ── Passphrase Unlock Screen ─────────────────────────── -->
-  <div id="unlock-view" class="view hidden">
+  <section id="unlock-view" class="view hidden" aria-labelledby="unlock-title">
     <div class="unlock-wrapper">
       <div class="logo">
         <div class="logo-icon">
@@ -37,13 +44,13 @@
             <path d="M12 30C12 30 16 36 24 36C32 36 36 30 36 30" stroke="rgba(255,255,255,0.9)" stroke-width="2.5" stroke-linecap="round" />
             <defs>
               <linearGradient id="grad1u" x1="0" y1="0" x2="48" y2="48">
-                <stop stop-color="#6C63FF" />
-                <stop offset="1" stop-color="#E040FB" />
+                <stop stop-color="#6F4E37" />
+                <stop offset="1" stop-color="#B5EAE2" />
               </linearGradient>
             </defs>
           </svg>
         </div>
-        <h1>BitMask</h1>
+        <div class="unlock-brand">BitMask</div>
       </div>
       <div class="unlock-card">
         <div class="unlock-icon" aria-hidden="true">
@@ -52,25 +59,26 @@
             <path d="M8 10V7a4 4 0 0 1 8 0v3" />
           </svg>
         </div>
-        <h2>Identity Locked</h2>
+        <h2 id="unlock-title">Identity locked</h2>
         <p>Your identity <code id="locked-peer-id">----</code> is protected by a passphrase.</p>
         <form id="unlock-form">
+          <label class="field-label" for="unlock-passphrase">Passphrase</label>
           <input type="password" id="unlock-passphrase" placeholder="Enter passphrase" autocomplete="off" />
           <button type="submit" class="btn btn-accent">Unlock</button>
         </form>
         <button id="unlock-skip-btn" class="btn btn-ghost">Use New Identity Instead</button>
       </div>
     </div>
-  </div>
+  </section>
 
   <!-- ── Landing View ─────────────────────────────────────── -->
-  <div id="landing-view" class="view hidden">
+  <section id="landing-view" class="view hidden" aria-labelledby="landing-title">
     <div class="landing-wrapper">
 
       <!-- Header -->
       <header class="landing-header">
-        <div class="landing-eyebrow"><span class="eyebrow-dot"></span> Private by design</div>
-        <div class="logo">
+        <div class="landing-header-row">
+          <div class="logo">
           <div class="logo-icon">
             <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
               <rect width="48" height="48" rx="12" fill="url(#grad1)" />
@@ -80,27 +88,42 @@
               <path d="M12 30C12 30 16 36 24 36C32 36 36 30 36 30" stroke="rgba(255,255,255,0.9)" stroke-width="2.5" stroke-linecap="round" />
               <defs>
                 <linearGradient id="grad1" x1="0" y1="0" x2="48" y2="48">
-                  <stop stop-color="#6C63FF" />
-                  <stop offset="1" stop-color="#E040FB" />
+                  <stop stop-color="#6F4E37" />
+                  <stop offset="1" stop-color="#B5EAE2" />
                 </linearGradient>
               </defs>
             </svg>
           </div>
-          <h1>BitMask</h1>
+            <span class="brand-name">BitMask</span>
+          </div>
+          <div class="landing-header-status"><span class="eyebrow-dot"></span> Private by design</div>
         </div>
-        <p class="tagline">Anonymous. Encrypted. Ephemeral.</p>
-        <p class="landing-intro">A calm, fast place to talk without accounts, tracking, or a message database.</p>
+        <div class="landing-hero-copy">
+          <p class="landing-eyebrow">Anonymous · encrypted · ephemeral</p>
+          <h1 id="landing-title">Private conversations, without the trail.</h1>
+          <p class="landing-intro">A calm, fast place to talk without accounts, tracking, or a message database. Create an identity, share it, and start a secure session in seconds.</p>
+        </div>
+        <div class="landing-proof" aria-label="BitMask privacy principles">
+          <span><strong>0</strong> accounts</span>
+          <span><strong>0</strong> message logs</span>
+          <span><strong>1</strong> private identity</span>
+        </div>
       </header>
 
       <!-- Identity Card -->
-      <section class="identity-card">
+      <section class="identity-card" aria-labelledby="identity-title">
         <div class="card-header">
-          <div class="status-row">
+          <div class="card-heading">
+            <span class="section-kicker">Step 01 · Your identity</span>
+            <h2 id="identity-title">Your private identity</h2>
+            <p>Share this ID or its QR code with the person you want to reach.</p>
+          </div>
+          <div class="status-row" aria-live="polite">
             <span id="status-dot" class="status-dot offline"></span>
             <span id="status-label" class="status-label">Connecting...</span>
           </div>
           <div class="card-actions">
-            <button id="sound-toggle-btn" class="btn btn-ghost btn-icon" title="Toggle sounds">
+            <button id="sound-toggle-btn" class="btn btn-ghost btn-icon" title="Toggle sounds" aria-label="Toggle sounds">
               <svg id="sound-icon-on" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M8 1.5L4 5H1v6h3l4 3.5V1.5zM11 4.5a5 5 0 010 7M13.5 2a9 9 0 010 12" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/>
               </svg>
@@ -108,7 +131,7 @@
                 <path d="M8 1.5L4 5H1v6h3l4 3.5V1.5zM11 5.5l4 5M15 5.5l-4 5" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/>
               </svg>
             </button>
-            <button id="new-identity-btn" class="btn btn-ghost" title="Generate new identity">
+            <button id="new-identity-btn" class="btn btn-ghost" title="Generate new identity" aria-label="Generate a new identity">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M13.65 2.35a8 8 0 1 0 .7 10.95l-1.42-1.42a6 6 0 1 1-.58-7.88L10 6h6V0l-2.35 2.35z"/>
               </svg>
@@ -118,14 +141,14 @@
         </div>
 
         <div class="peer-id-section">
-          <label>Your Peer ID</label>
+          <span class="field-label">Your Peer ID</span>
           <div class="peer-id-box">
             <code id="peer-id-display">---- - ---- - ---- - ----</code>
             <span id="peer-id-raw" hidden></span>
           </div>
           <div class="peer-id-actions">
-            <button id="copy-id-btn" class="btn btn-primary">Copy ID</button>
-            <button id="qr-btn" class="btn btn-ghost" title="Show QR Code">
+            <button id="copy-id-btn" class="btn btn-primary">Copy peer ID</button>
+            <button id="qr-btn" class="btn btn-ghost" title="Show QR Code" aria-label="Show your peer QR code">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                 <rect x="1" y="1" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.2" fill="none"/>
                 <rect x="3" y="3" width="2" height="2" fill="currentColor"/>
@@ -162,13 +185,21 @@
           </div>
         </div>
 
-        <p class="hint">Share this ID with someone to let them connect to you.</p>
+        <p class="hint">Default: this identity disappears when you close the tab. Turn on Remember Identity only on a device you trust.</p>
       </section>
 
       <!-- Connect Form -->
-      <section class="connect-section">
-        <h2>Connect to a Peer</h2>
+      <section class="connect-section" aria-labelledby="connect-title">
+        <div class="section-heading-row">
+          <div>
+            <span class="section-kicker">Step 02 · Direct chat</span>
+            <h2 id="connect-title">Connect with someone</h2>
+            <p class="section-lead">Paste a 16-character Peer ID, or use the camera to scan one.</p>
+          </div>
+          <span class="section-index">01:01</span>
+        </div>
         <form id="connect-form">
+          <label class="field-label" for="target-peer-input">Peer ID</label>
           <div class="input-group connect-input-group">
             <input
               type="text"
@@ -179,7 +210,7 @@
               spellcheck="false"
             />
             <div class="connect-actions">
-              <button type="button" id="scan-qr-btn" class="btn btn-ghost" title="Scan a peer or room QR code">
+              <button type="button" id="scan-qr-btn" class="btn btn-ghost" title="Scan a peer or room QR code" aria-label="Scan a peer or room QR code">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/>
                   <path d="M8 8h3v3H8zM13 13h3v3h-3z"/>
@@ -193,9 +224,15 @@
       </section>
 
       <!-- Group Room Section -->
-      <section class="group-section">
-        <h2>Group Rooms</h2>
-        <p class="group-desc">Create or join an encrypted room for 3+ peers.</p>
+      <section class="group-section" aria-labelledby="group-title">
+        <div class="section-heading-row">
+          <div>
+            <span class="section-kicker">Step 02 · Shared space</span>
+            <h2 id="group-title">Bring a group together</h2>
+            <p class="group-desc">Create or join an encrypted room for 3–20 peers.</p>
+          </div>
+          <span class="section-index">03–20</span>
+        </div>
         <div class="group-actions">
           <button id="create-group-btn" class="btn btn-accent">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -206,7 +243,8 @@
             Create Room
           </button>
           <div class="group-divider"><span>or</span></div>
-          <form id="join-group-form" class="join-group-form">
+        <form id="join-group-form" class="join-group-form">
+            <label class="field-label" for="room-code-input">Room code</label>
             <div class="input-group">
               <input
                 type="text"
@@ -223,7 +261,12 @@
       </section>
 
       <!-- Features -->
-      <section class="features">
+      <section class="features" aria-labelledby="principles-title">
+        <div class="features-heading">
+          <span class="section-kicker">Why BitMask</span>
+          <h2 id="principles-title">Private by architecture.</h2>
+          <p>Every interaction is designed to keep control close to you.</p>
+        </div>
         <div class="feature">
           <div class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
           <h3>End-to-End Encrypted</h3>
@@ -260,7 +303,7 @@
         </div>
       </footer>
     </div>
-  </div>
+  </section>
 
   <!-- ── QR Modal ─────────────────────────────────────────── -->
   <div id="qr-modal" class="modal hidden">
@@ -306,7 +349,7 @@
     <div class="modal-content">
       <div class="modal-header">
         <h3>Export Identity</h3>
-        <button class="modal-close-btn">&times;</button>
+        <button class="modal-close-btn" type="button" aria-label="Close export dialog">&times;</button>
       </div>
       <p class="modal-desc">Download your identity as an encrypted file. You can import it later on any device.</p>
       <form id="export-form">
@@ -323,7 +366,7 @@
     <div class="modal-content">
       <div class="modal-header">
         <h3>Import Identity</h3>
-        <button class="modal-close-btn">&times;</button>
+        <button class="modal-close-btn" type="button" aria-label="Close import dialog">&times;</button>
       </div>
       <p class="modal-desc">Restore a previously exported .bitmask identity file.</p>
       <form id="import-form">
@@ -346,7 +389,7 @@
     <div class="modal-content">
       <div class="modal-header">
           <h3>Lock Identity</h3>
-        <button class="modal-close-btn">&times;</button>
+        <button class="modal-close-btn" type="button" aria-label="Close lock dialog">&times;</button>
       </div>
       <p class="modal-desc">Protect your persistent identity with a passphrase. You'll need to enter it each time you open BitMask.</p>
       <form id="lock-form">
@@ -361,14 +404,14 @@
   <div id="room-created-modal" class="modal hidden">
     <div class="modal-backdrop"></div>
     <div class="modal-content qr-modal-content">
-      <button class="modal-close-btn qr-close-btn">&times;</button>
+      <button class="modal-close-btn qr-close-btn" type="button" aria-label="Close room dialog">&times;</button>
       <div class="room-created-card">
         <div class="room-created-icon">
           <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
             <circle cx="16" cy="16" r="8" stroke="url(#rcgrad)" stroke-width="2.5" fill="none"/>
             <circle cx="32" cy="16" r="8" stroke="url(#rcgrad)" stroke-width="2.5" fill="none"/>
             <circle cx="24" cy="32" r="8" stroke="url(#rcgrad)" stroke-width="2.5" fill="none"/>
-            <defs><linearGradient id="rcgrad" x1="0" y1="0" x2="48" y2="48"><stop stop-color="#6C63FF"/><stop offset="1" stop-color="#E040FB"/></linearGradient></defs>
+            <defs><linearGradient id="rcgrad" x1="0" y1="0" x2="48" y2="48"><stop stop-color="#6F4E37"/><stop offset="1" stop-color="#B5EAE2"/></linearGradient></defs>
           </svg>
         </div>
         <h2 class="room-created-title">Group Room Created</h2>
@@ -389,7 +432,7 @@
     <div class="modal-content">
       <div class="modal-header">
           <h3>Room Members</h3>
-        <button class="modal-close-btn">&times;</button>
+        <button class="modal-close-btn" type="button" aria-label="Close members dialog">&times;</button>
       </div>
       <div id="members-list" class="members-list"></div>
     </div>
@@ -401,7 +444,7 @@
     <!-- Chat Header -->
     <header class="chat-header">
       <div class="chat-header-left">
-        <button id="leave-btn" class="btn btn-ghost btn-icon" title="Leave chat">
+        <button id="leave-btn" class="btn btn-ghost btn-icon" title="Leave chat" aria-label="Leave chat">
           <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
             <path d="M15 10H3m0 0l5-5M3 10l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
           </svg>
@@ -416,7 +459,7 @@
           <span id="chat-group-info" class="hidden">
             <span class="chat-peer-label">Group Room</span>
             <code id="group-room-code" class="room-code-badge">------</code>
-            <button id="copy-room-code-btn" class="btn btn-ghost btn-icon btn-xs" title="Copy room code">
+            <button id="copy-room-code-btn" class="btn btn-ghost btn-icon btn-xs" title="Copy room code" aria-label="Copy room code">
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="4" y="1" width="7" height="7" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="1" y="4" width="7" height="7" rx="1" fill="var(--bg-primary)" stroke="currentColor" stroke-width="1.2"/></svg>
             </button>
           </span>
@@ -432,7 +475,7 @@
       </div>
       <div class="chat-header-right">
         <!-- Group member count -->
-        <button id="member-count-btn" class="member-count-badge hidden" title="View members">
+        <button id="member-count-btn" class="member-count-badge hidden" title="View members" aria-label="View room members">
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
             <circle cx="5" cy="4" r="2.5" stroke="currentColor" stroke-width="1.2"/>
             <path d="M1 12c0-2.5 2-4 4-4s4 1.5 4 4" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linecap="round"/>
@@ -442,12 +485,12 @@
           <span id="member-count">1</span>
         </button>
         <!-- Voice & Video Call Buttons (Direct 1:1 only) -->
-        <button id="audio-call-btn" class="btn btn-ghost btn-icon hidden" title="Start voice call">
+        <button id="audio-call-btn" class="btn btn-ghost btn-icon hidden" title="Start voice call" aria-label="Start voice call">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
           </svg>
         </button>
-        <button id="video-call-btn" class="btn btn-ghost btn-icon hidden" title="Start video call">
+        <button id="video-call-btn" class="btn btn-ghost btn-icon hidden" title="Start video call" aria-label="Start video call">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M23 7l-7 5 7 5V7z"/>
             <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
@@ -459,7 +502,7 @@
           </svg>
           E2EE Active
         </div>
-        <button id="panic-btn" class="btn btn-ghost btn-icon btn-panic" title="Panic Wipe (Alt+Shift+X)">
+        <button id="panic-btn" class="btn btn-ghost btn-icon btn-panic" title="Panic Wipe (Alt+Shift+X)" aria-label="Emergency wipe">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
             <line x1="12" y1="9" x2="12" y2="13"/>
@@ -486,7 +529,7 @@
     <div id="messages-container" class="messages-container"></div>
 
     <!-- Typing Indicator -->
-    <div id="typing-indicator" class="typing-indicator">
+    <div id="typing-indicator" class="typing-indicator" aria-live="polite">
       <div class="typing-dots">
         <span></span><span></span><span></span>
       </div>
@@ -502,12 +545,12 @@
         </div>
         <button id="cancel-reply-btn" type="button" class="btn btn-ghost btn-icon btn-xs" title="Cancel reply" aria-label="Cancel reply">&times;</button>
       </div>
-      <button type="button" id="file-attach-btn" class="btn btn-ghost btn-icon" title="Send file (max 25MB)">
+      <button type="button" id="file-attach-btn" class="btn btn-ghost btn-icon" title="Send file (max 25MB)" aria-label="Attach a file">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
         </svg>
       </button>
-      <button type="button" id="view-once-btn" class="btn btn-ghost btn-icon" title="Toggle View Once Mode">
+      <button type="button" id="view-once-btn" class="btn btn-ghost btn-icon" title="Toggle View Once Mode" aria-label="Toggle view once mode">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
           <circle cx="12" cy="12" r="3"/>
@@ -523,7 +566,7 @@
         rows="1"
         aria-label="Message"
       ></textarea>
-      <button type="submit" class="btn btn-send" title="Send">
+      <button type="submit" class="btn btn-send" title="Send" aria-label="Send message">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="22" y1="2" x2="11" y2="13"/>
           <polygon points="22 2 15 22 11 13 2 9 22 2"/>
@@ -531,6 +574,8 @@
       </button>
     </form>
   </div>
+
+  </main>
 
   <!-- ── Media Preview Modal ───────────────────────────────── -->
   <div id="media-preview-modal" class="modal hidden" aria-hidden="true">
@@ -549,7 +594,7 @@
   </div>
 
   <!-- ── E2EE Calling Overlay (Floating minimalist panel) ── -->
-  <div id="call-overlay" class="modal hidden">
+  <div id="call-overlay" class="modal hidden" aria-hidden="true">
     <div class="modal-backdrop"></div>
     <div class="modal-content call-overlay-content">
       <div class="modal-header">
@@ -601,7 +646,7 @@
   </div>
 
   <!-- ── E2EE Incoming Call Ring Overlay ── -->
-  <div id="incoming-call-modal" class="modal hidden">
+  <div id="incoming-call-modal" class="modal hidden" aria-hidden="true">
     <div class="modal-backdrop"></div>
     <div class="modal-content incoming-call-card">
       <div id="incoming-call-avatar" class="incoming-ring-avatar" aria-hidden="true">
@@ -621,12 +666,12 @@
   </div>
 
   <!-- ── View Once Modal ───────────────────────────────── -->
-  <div id="view-once-modal" class="modal hidden">
+  <div id="view-once-modal" class="modal hidden" aria-hidden="true">
     <div class="modal-backdrop"></div>
     <div class="modal-content view-once-modal-content">
       <div class="modal-header">
         <h3>View Once Media</h3>
-        <button class="modal-close-btn view-once-close-btn">&times;</button>
+          <button class="modal-close-btn view-once-close-btn" type="button" aria-label="Close view once media">&times;</button>
       </div>
       <div id="view-once-media-container" class="view-once-media-container"></div>
       <p class="view-once-warn">This media is permanently deleted as soon as you close it.</p>

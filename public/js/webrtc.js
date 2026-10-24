@@ -616,7 +616,7 @@ class BitMaskCallController {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       
       const waves = [
-        { amplitude: 18, frequency: 0.03, color: 'rgba(0, 242, 254, 0.55)', phaseOffset: 0 },
+        { amplitude: 18, frequency: 0.03, color: 'rgba(181, 234, 226, 0.55)', phaseOffset: 0 },
         { amplitude: 12, frequency: 0.05, color: 'rgba(79, 172, 254, 0.35)', phaseOffset: Math.PI / 2.5 },
         { amplitude: 8, frequency: 0.02, color: 'rgba(0, 255, 178, 0.3)', phaseOffset: -Math.PI / 3 }
       ];

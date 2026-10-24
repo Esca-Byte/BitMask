@@ -1,9 +1,11 @@
 // BitMask Service Worker
-const CACHE_NAME = 'bitmask-v5';
+const CACHE_NAME = 'bitmask-v9';
 const ASSETS = [
   '/',
   '/index.html',
   '/css/style.css',
+  '/css/app-redesign.css',
+  '/css/legal.css',
   '/js/crypto.js',
   '/js/identity.js',
   '/js/qrcode.js',
