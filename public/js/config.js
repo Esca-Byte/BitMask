@@ -13,7 +13,9 @@
     window.Capacitor?.isNativePlatform?.() ||
     ['capacitor:', 'ionic:'].includes(window.location.protocol)
   );
-  const configured = window.BITMASK_SERVER_URL || RENDER_SERVER_URL;
+  const configured = window.BITMASK_SERVER_URL || (
+    nativePlatform ? RENDER_SERVER_URL : window.location.origin
+  );
   const serverUrl = (configured || (nativePlatform ? '' : window.location.origin))
     .replace(/\/$/, '');
 

@@ -2,6 +2,13 @@
 //  BitMask — WebRTC E2EE calling controller
 // ─────────────────────────────────────────────────────────────
 
+function formatCallDuration(milliseconds) {
+  const totalSeconds = Math.max(0, Math.floor(Number(milliseconds) / 1000));
+  const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
+  const seconds = (totalSeconds % 60).toString().padStart(2, '0');
+  return `${minutes}:${seconds}`;
+}
+
 class BitMaskCallController {
   constructor() {
     this.localStream = null;
@@ -17,6 +24,9 @@ class BitMaskCallController {
     this.isCameraOff = false;
     this.audioContext = null;
     this.ringInterval = null;
+    this.statsInterval = null;
+    this.statsStartedAt = null;
+    this.previousStats = null;
 
     // Standard public Google STUN server for NAT traversal
     this.rtcConfig = {
@@ -55,6 +65,9 @@ class BitMaskCallController {
       idle: 'CALL ENDED',
     };
     badge.textContent = labels[state] || 'CALL';
+    const diagnosticsState = document.getElementById('call-diagnostics-state');
+    if (diagnosticsState) diagnosticsState.textContent = labels[state] || 'Call';
+    if (state === 'connected' && !this.statsStartedAt) this.statsStartedAt = Date.now();
   }
 
   // ── Procedural Sound Ringing Synthesizer ───────────────────
@@ -332,6 +345,7 @@ class BitMaskCallController {
     this.isCallActive = true;
     this.setCallState('connecting');
     this.peerConnection = new RTCPeerConnection(this.rtcConfig);
+    this.startDiagnosticsMonitor();
 
     // Bind ICE candidates routing
     this.peerConnection.onicecandidate = (event) => {
@@ -347,6 +361,7 @@ class BitMaskCallController {
     this.peerConnection.onconnectionstatechange = () => {
       if (this.callState === 'idle') return;
       const state = this.peerConnection?.connectionState;
+      this.updateDiagnosticsState(state);
       if (state === 'connected') {
         this.setCallState('connected');
         this.stopRingingTone();
@@ -456,6 +471,108 @@ class BitMaskCallController {
     }
   }
 
+  toggleDiagnostics() {
+    const panel = document.getElementById('call-diagnostics');
+    const button = document.getElementById('call-diagnostics-btn');
+    if (!panel || !button) return;
+    const shouldOpen = panel.classList.contains('hidden');
+    panel.classList.toggle('hidden', !shouldOpen);
+    button.setAttribute('aria-expanded', String(shouldOpen));
+    if (shouldOpen) this.collectCallStats();
+  }
+
+  startDiagnosticsMonitor() {
+    this.stopDiagnosticsMonitor();
+    this.previousStats = null;
+    this.collectCallStats();
+    this.statsInterval = setInterval(() => this.collectCallStats(), 2000);
+  }
+
+  stopDiagnosticsMonitor() {
+    if (this.statsInterval) clearInterval(this.statsInterval);
+    this.statsInterval = null;
+    this.previousStats = null;
+    this.statsStartedAt = null;
+  }
+
+  updateDiagnosticsState(state) {
+    const element = document.getElementById('call-diagnostics-state');
+    if (!element) return;
+    const labels = {
+      new: 'Starting',
+      connecting: 'Connecting',
+      connected: 'Connected',
+      disconnected: 'Unstable',
+      failed: 'Failed',
+      closed: 'Closed',
+    };
+    element.textContent = labels[state] || state || 'Unknown';
+  }
+
+  async collectCallStats() {
+    const connection = this.peerConnection;
+    if (!connection?.getStats) return;
+
+    try {
+      const reports = await connection.getStats();
+      let roundTripTime = null;
+      let bytes = 0;
+      let packetsReceived = 0;
+      let packetsSent = 0;
+      let packetsLost = 0;
+
+      reports.forEach((report) => {
+        if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+          const isPreferred = report.nominated || report.selected;
+          if (isPreferred && Number.isFinite(report.currentRoundTripTime)) {
+            roundTripTime = report.currentRoundTripTime * 1000;
+          }
+        }
+        if (report.type === 'remote-inbound-rtp' && Number.isFinite(report.roundTripTime)) {
+          roundTripTime = report.roundTripTime * 1000;
+        }
+        if (report.type === 'inbound-rtp') {
+          bytes += Number(report.bytesReceived) || 0;
+          packetsReceived += Number(report.packetsReceived) || 0;
+          packetsLost += Number(report.packetsLost) || 0;
+        }
+        if (report.type === 'outbound-rtp') {
+          bytes += Number(report.bytesSent) || 0;
+          packetsSent += Number(report.packetsSent) || 0;
+          packetsLost += Number(report.packetsLost) || 0;
+        }
+      });
+
+      const now = Date.now();
+      const current = { now, bytes, packetsReceived, packetsSent, packetsLost };
+      let bitrate = null;
+      if (this.previousStats && now > this.previousStats.now && bytes >= this.previousStats.bytes) {
+        bitrate = ((bytes - this.previousStats.bytes) * 8) / ((now - this.previousStats.now) / 1000);
+      }
+      this.previousStats = current;
+
+      const totalPackets = packetsReceived + packetsSent + packetsLost;
+      const loss = totalPackets > 0 ? (packetsLost / totalPackets) * 100 : null;
+      const duration = this.statsStartedAt ? formatCallDuration(now - this.statsStartedAt) : '00:00';
+
+      this.setDiagnosticValue('call-diagnostics-latency', Number.isFinite(roundTripTime) ? `${Math.round(roundTripTime)} ms` : '—');
+      this.setDiagnosticValue('call-diagnostics-loss', Number.isFinite(loss) ? `${loss.toFixed(1)}%` : '—');
+      this.setDiagnosticValue('call-diagnostics-bitrate', Number.isFinite(bitrate) ? `${Math.round(bitrate / 1000)} kbps` : '—');
+      this.setDiagnosticValue('call-diagnostics-duration', duration);
+      this.updateDiagnosticsState(connection.connectionState);
+    } catch (error) {
+      console.info('[BitMask] Call diagnostics unavailable:', error.message);
+      this.setDiagnosticValue('call-diagnostics-latency', 'Unavailable');
+      this.setDiagnosticValue('call-diagnostics-loss', 'Unavailable');
+      this.setDiagnosticValue('call-diagnostics-bitrate', 'Unavailable');
+    }
+  }
+
+  setDiagnosticValue(id, value) {
+    const element = document.getElementById(id);
+    if (element) element.textContent = value;
+  }
+
   // ── Control Toggles ────────────────────────────────────────
   toggleMute() {
     if (!this.localStream) return;
@@ -519,6 +636,7 @@ class BitMaskCallController {
     this.stopRingingTone();
     this.clearIncomingTimeout();
     this.stopVoiceWaveAnimation();
+    this.stopDiagnosticsMonitor();
 
     if (this.localStream) {
       this.localStream.getTracks().forEach(track => track.stop());
@@ -545,6 +663,10 @@ class BitMaskCallController {
     // Hide Calling card
     document.getElementById('call-overlay').classList.add('hidden');
     document.getElementById('incoming-call-modal').classList.add('hidden');
+    const diagnostics = document.getElementById('call-diagnostics');
+    const diagnosticsButton = document.getElementById('call-diagnostics-btn');
+    diagnostics?.classList.add('hidden');
+    diagnosticsButton?.setAttribute('aria-expanded', 'false');
 
     this.roomId = null;
     this.targetPeerId = null;

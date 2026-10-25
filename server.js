@@ -80,6 +80,9 @@ const pendingMessages = new Map();
 const fileTransfers = new Map();
 // Rate limiting for socket events per IP
 const socketRateMap = new Map();
+// Invite tokens are short-lived, single-use capabilities. They never contain
+// message content or private keys and are kept only in volatile memory.
+const invites = new Map();
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -102,6 +105,35 @@ function generateRoomCode() {
   return Array.from(bytes).map(b => chars[b % chars.length]).join('');
 }
 
+function generateInviteToken() {
+  return crypto.randomBytes(12).toString('hex').toUpperCase();
+}
+
+function invitePayload(kind, token) {
+  return `BM1/${kind === 'room' ? 'R' : 'P'}/${token}`;
+}
+
+function getValidInvite(token, kind, expectedValue, consumerPeerId) {
+  if (!token || typeof token !== 'string') return { error: 'Invite token required.' };
+  const invite = invites.get(token.toUpperCase());
+  if (!invite) return { error: 'Invite expired or already used.' };
+  if (invite.expiresAt <= Date.now()) {
+    invites.delete(token.toUpperCase());
+    return { error: 'Invite expired.' };
+  }
+  if (kind && invite.kind !== kind) return { error: 'Invite type does not match this action.' };
+  if (expectedValue && invite.value !== expectedValue) return { error: 'Invite target does not match.' };
+  if (consumerPeerId && invite.createdBy === consumerPeerId) return { error: 'You cannot use your own invite.' };
+  return { invite, token: token.toUpperCase() };
+}
+
+function consumeInvite(token, kind, expectedValue, consumerPeerId) {
+  const result = getValidInvite(token, kind, expectedValue, consumerPeerId);
+  if (result.error) return result;
+  invites.delete(result.token);
+  return result;
+}
+
 function isRateLimited(ip, maxPerMinute = 60) {
   const now = Date.now();
   if (!socketRateMap.has(ip)) {
@@ -111,6 +143,13 @@ function isRateLimited(ip, maxPerMinute = 60) {
   timestamps.push(now);
   socketRateMap.set(ip, timestamps);
   return timestamps.length > maxPerMinute;
+}
+
+function normalizeMessageTtl(value, fallback = 30000) {
+  if (value === 0 || value === '0') return 0;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.min(Math.max(numeric, 5000), 86400000);
 }
 
 // Clean up stale rate-limit entries every 5 minutes
@@ -130,6 +169,13 @@ setInterval(() => {
   }
 }, 60000);
 
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, invite] of invites) {
+    if (invite.expiresAt <= now) invites.delete(token);
+  }
+}, 15000);
+
 // ── REST Endpoints ───────────────────────────────────────────
 
 app.get('/api/health', (_req, res) => {
@@ -146,6 +192,77 @@ io.on('connection', (socket) => {
 
   socket.on('connection-ping', (_payload, callback) => {
     callback?.({ timestamp: Date.now() });
+  });
+
+  // ── Create a short-lived QR/link invite ─────────────────────
+  socket.on('create-invite', ({ kind = 'peer', roomId, ttlMs } = {}, callback) => {
+    if (isRateLimited(ip, 30)) {
+      return callback?.({ error: 'Rate limited.' });
+    }
+
+    const myPeerId = socketToPeer.get(socket.id);
+    if (!myPeerId) return callback?.({ error: 'You must register first.' });
+
+    const safeKind = kind === 'room' ? 'room' : 'peer';
+    const safeTtl = Math.min(Math.max(Number(ttlMs) || 300000, 60000), 3600000);
+    let value;
+
+    if (safeKind === 'room') {
+      const room = rooms.get(roomId);
+      if (!room || !room.isGroup || !room.members.has(myPeerId)) {
+        return callback?.({ error: 'Group room not found.' });
+      }
+      value = room.roomCode;
+    } else {
+      value = myPeerId;
+    }
+
+    const token = generateInviteToken();
+    const expiresAt = Date.now() + safeTtl;
+    invites.set(token, {
+      kind: safeKind,
+      value,
+      roomId: safeKind === 'room' ? roomId : null,
+      createdBy: myPeerId,
+      expiresAt,
+    });
+
+    callback?.({
+      success: true,
+      kind: safeKind,
+      token,
+      payload: invitePayload(safeKind, token),
+      value,
+      expiresAt,
+      ttlMs: safeTtl,
+    });
+  });
+
+  // Resolve an invite without consuming it. The follow-up connect/join event
+  // consumes it only after the requested operation succeeds.
+  socket.on('redeem-invite', ({ token } = {}, callback) => {
+    if (isRateLimited(ip, 60)) {
+      return callback?.({ error: 'Rate limited.' });
+    }
+
+    const result = getValidInvite(token);
+    if (result.error) return callback?.({ error: result.error });
+
+    const { invite } = result;
+    if (invite.kind === 'peer' && !peers.has(invite.value)) {
+      return callback?.({ error: 'Peer is offline.' });
+    }
+    if (invite.kind === 'room' && !roomCodes.has(invite.value)) {
+      return callback?.({ error: 'Room no longer exists.' });
+    }
+
+    callback?.({
+      success: true,
+      kind: invite.kind,
+      value: invite.value,
+      token: result.token,
+      expiresAt: invite.expiresAt,
+    });
   });
 
   // ── Register Peer ──────────────────────────────────────────
@@ -192,7 +309,7 @@ io.on('connection', (socket) => {
   });
 
   // ── Connect to Peer (1:1 Direct Chat) ──────────────────────
-  socket.on('connect-to-peer', ({ targetPeerId }, callback) => {
+  socket.on('connect-to-peer', ({ targetPeerId, inviteToken }, callback) => {
     if (isRateLimited(ip)) {
       return callback({ error: 'Rate limited.' });
     }
@@ -207,6 +324,11 @@ io.on('connection', (socket) => {
     const target = peers.get(targetPeerId);
     if (!target) {
       return callback({ error: 'Peer not found or offline.' });
+    }
+
+    if (inviteToken) {
+      const inviteResult = consumeInvite(inviteToken, 'peer', targetPeerId, myPeerId);
+      if (inviteResult.error) return callback({ error: inviteResult.error });
     }
 
     // Create a room with new model
@@ -292,7 +414,7 @@ io.on('connection', (socket) => {
   });
 
   // ── Join Group Room ────────────────────────────────────────
-  socket.on('join-room', ({ roomCode: code }, callback) => {
+  socket.on('join-room', ({ roomCode: code, inviteToken }, callback) => {
     if (isRateLimited(ip)) {
       return callback({ error: 'Rate limited.' });
     }
@@ -317,6 +439,11 @@ io.on('connection', (socket) => {
 
     if (room.members.size >= 20) {
       return callback({ error: 'Room is full (max 20 members).' });
+    }
+
+    if (inviteToken) {
+      const inviteResult = consumeInvite(inviteToken, 'room', normalCode, myPeerId);
+      if (inviteResult.error) return callback({ error: inviteResult.error });
     }
 
     const myPeer = peers.get(myPeerId);
@@ -413,7 +540,7 @@ io.on('connection', (socket) => {
       from: myPeerId,
       cipher,
       nonce,
-      ttl: Math.min(Math.max(ttl || 5000, 5000), 86400000), // 5s – 24h
+       ttl: normalizeMessageTtl(ttl, 5000), // Off or 5s – 24h
       timestamp: Date.now(),
     };
 
@@ -434,17 +561,19 @@ io.on('connection', (socket) => {
     }
 
     // Schedule server-side deletion of any queued copies
-    const safeTtl = message.ttl;
-    setTimeout(() => {
-      for (const [pid] of room.members) {
-        if (pid === myPeerId) continue;
-        if (pendingMessages.has(pid)) {
-          const q = pendingMessages.get(pid).filter(m => m.id !== msgId);
-          if (q.length === 0) pendingMessages.delete(pid);
-          else pendingMessages.set(pid, q);
-        }
-      }
-    }, safeTtl);
+     const safeTtl = message.ttl;
+     if (safeTtl > 0) {
+       setTimeout(() => {
+         for (const [pid] of room.members) {
+           if (pid === myPeerId) continue;
+           if (pendingMessages.has(pid)) {
+             const q = pendingMessages.get(pid).filter(m => m.id !== msgId);
+             if (q.length === 0) pendingMessages.delete(pid);
+             else pendingMessages.set(pid, q);
+           }
+         }
+       }, safeTtl);
+     }
 
     callback?.({ success: true, msgId });
   });
@@ -501,7 +630,7 @@ io.on('connection', (socket) => {
     }
 
     const msgId = generateMessageId();
-    const safeTtl = Math.min(Math.max(ttl || 30000, 5000), 86400000);
+     const safeTtl = normalizeMessageTtl(ttl, 30000);
     const safeMetadata = { ...metadata, size: fileSize };
     fileTransfers.set(msgId, {
       roomId,
@@ -509,7 +638,7 @@ io.on('connection', (socket) => {
       metadata: safeMetadata,
       ttl: safeTtl,
       chunkCount: count,
-      expiresAt: Date.now() + safeTtl,
+       expiresAt: Date.now() + (safeTtl > 0 ? safeTtl : 86400000),
     });
 
     const startMessage = {
@@ -594,6 +723,27 @@ io.on('connection', (socket) => {
     callback?.({ success: true });
   });
 
+  socket.on('send-file-cancel', ({ roomId, msgId }, callback) => {
+    const myPeerId = socketToPeer.get(socket.id);
+    const transfer = fileTransfers.get(msgId);
+    if (!myPeerId || !transfer) return callback?.({ error: 'File transfer not found.' });
+    if (transfer.roomId !== roomId || transfer.from !== myPeerId) {
+      return callback?.({ error: 'Invalid file transfer.' });
+    }
+
+    const room = rooms.get(roomId);
+    if (!room || !room.members.has(myPeerId)) return callback?.({ error: 'Not a member of this room.' });
+
+    fileTransfers.delete(msgId);
+    for (const [pid] of room.members) {
+      if (pid === myPeerId) continue;
+      const target = peers.get(pid);
+      const targetSocket = target && io.sockets.sockets.get(target.socketId);
+      targetSocket?.emit('file-cancelled', { id: msgId, from: myPeerId });
+    }
+    callback?.({ success: true });
+  });
+
   // ── Send Encrypted File ──────────────────────────────────
   socket.on('send-file', ({ roomId, cipher, nonce, metadata, ttl }, callback) => {
     if (isRateLimited(ip, 30)) {
@@ -641,7 +791,7 @@ io.on('connection', (socket) => {
       cipher,
       nonce,
       metadata: { ...metadata, size: fileSize },
-      ttl: Math.min(Math.max(ttl || 30000, 5000), 86400000),
+       ttl: normalizeMessageTtl(ttl, 30000),
       timestamp: Date.now(),
     };
 
@@ -700,6 +850,69 @@ io.on('connection', (socket) => {
         });
       }
     }
+  });
+
+  // ── Group Room Controls ────────────────────────────────────
+  socket.on('remove-room-member', ({ roomId, targetPeerId }, callback) => {
+    if (isRateLimited(ip, 30)) return callback?.({ error: 'Rate limited.' });
+
+    const myPeerId = socketToPeer.get(socket.id);
+    const room = rooms.get(roomId);
+    if (!myPeerId || !room) return callback?.({ error: 'Room not found.' });
+    if (!room.isGroup || room.host !== myPeerId) return callback?.({ error: 'Only the room host can remove members.' });
+    if (!targetPeerId || targetPeerId === myPeerId || !room.members.has(targetPeerId)) {
+      return callback?.({ error: 'Room member not found.' });
+    }
+
+    room.members.delete(targetPeerId);
+    pendingMessages.delete(targetPeerId);
+    for (const [transferId, transfer] of fileTransfers) {
+      if (transfer.roomId === roomId && transfer.from === targetPeerId) fileTransfers.delete(transferId);
+    }
+
+    const target = peers.get(targetPeerId);
+    const targetSocket = target && io.sockets.sockets.get(target.socketId);
+    if (target) target.connectedTo = null;
+    targetSocket?.leave(roomId);
+    targetSocket?.emit('room-member-removed', { roomId, peerId: targetPeerId });
+
+    for (const [pid] of room.members) {
+      const member = peers.get(pid);
+      const memberSocket = member && io.sockets.sockets.get(member.socketId);
+      memberSocket?.emit('peer-left', {
+        roomId,
+        peerId: targetPeerId,
+        memberCount: room.members.size,
+        reason: 'removed',
+      });
+    }
+
+    callback?.({ success: true, memberCount: room.members.size });
+  });
+
+  socket.on('close-room', ({ roomId }, callback) => {
+    if (isRateLimited(ip, 15)) return callback?.({ error: 'Rate limited.' });
+
+    const myPeerId = socketToPeer.get(socket.id);
+    const room = rooms.get(roomId);
+    if (!myPeerId || !room) return callback?.({ error: 'Room not found.' });
+    if (!room.isGroup || room.host !== myPeerId) return callback?.({ error: 'Only the room host can close this room.' });
+
+    for (const [pid] of room.members) {
+      pendingMessages.delete(pid);
+      const member = peers.get(pid);
+      if (member) member.connectedTo = null;
+      const memberSocket = member && io.sockets.sockets.get(member.socketId);
+      memberSocket?.leave(roomId);
+      if (pid !== myPeerId) memberSocket?.emit('room-closed', { roomId });
+    }
+
+    for (const [transferId, transfer] of fileTransfers) {
+      if (transfer.roomId === roomId) fileTransfers.delete(transferId);
+    }
+    if (room.roomCode) roomCodes.delete(room.roomCode);
+    rooms.delete(roomId);
+    callback?.({ success: true });
   });
 
   // ── Disconnect Room ────────────────────────────────────────
@@ -822,6 +1035,9 @@ io.on('connection', (socket) => {
     peers.delete(peerId);
     socketToPeer.delete(socket.id);
     pendingMessages.delete(peerId);
+    for (const [token, invite] of invites) {
+      if (invite.createdBy === peerId) invites.delete(token);
+    }
     for (const [transferId, transfer] of fileTransfers) {
       if (transfer.from === peerId) fileTransfers.delete(transferId);
     }

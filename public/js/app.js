@@ -10,6 +10,9 @@ const BitMaskApp = (() => {
   let sharedKey = null;
   let currentRoomId = null;
   let connectedPeerId = null;
+  let connectedPeerPublicKey = null;
+  let localFingerprint = null;
+  let connectedPeerFingerprint = null;
   let messageTTL = 30000; // default 30s
   let typingTimeout = null;
   let isTypingSent = false;
@@ -25,12 +28,24 @@ const BitMaskApp = (() => {
   let qrScannerFrame = null;
   let qrDetector = null;
   let qrScanBusy = false;
+  let qrInviteToken = null;
+  let qrInvitePayload = null;
+  let qrInviteExpiresAt = null;
+  let roomInviteToken = null;
+  let roomInvitePayload = null;
+  let roomInviteExpiresAt = null;
+  let inviteExpiryTimer = null;
+  let pendingInviteToken = null;
+  let reconnectInProgress = false;
+  let reconnectToastShown = false;
+  let deferredInstallPrompt = null;
 
   // ── Group State ────────────────────────────────────────────
   let isGroupChat = false;
   let groupKey = null;          // AES-256 CryptoKey for group encryption
   let roomCode = null;          // 6-char room code
   let isHost = false;
+  let roomHostPeerId = null;
   let groupMembers = new Map(); // peerId -> { publicKey }
   let typingPeers = new Set();  // peer IDs currently typing
 
@@ -67,10 +82,12 @@ const BitMaskApp = (() => {
 
     // 3. Sync UI state
     updatePeerIdDisplay();
+    await refreshLocalFingerprint();
     syncSoundToggle();
     syncRememberMeToggle();
 
     // 4. Set up event handlers
+    setupInstallPrompt();
     setupSocketHandlers();
     setupUIHandlers();
     setupModalHandlers();
@@ -82,6 +99,7 @@ const BitMaskApp = (() => {
     // Show landing
     showView('landing-view');
     registerServiceWorker();
+    setTimeout(checkUrlHash, 700);
   }
 
   async function generateNewIdentity(reRegister = true) {
@@ -91,6 +109,7 @@ const BitMaskApp = (() => {
 
     // Save identity
     await BitMaskIdentity.save(peerId, keyPair, publicKeyBase64);
+    await refreshLocalFingerprint();
 
     if (reRegister) {
       updatePeerIdDisplay();
@@ -111,9 +130,35 @@ const BitMaskApp = (() => {
     });
   }
 
+  function setupInstallPrompt() {
+    if (window.__bitmaskInstallPromptReady) return;
+    window.__bitmaskInstallPromptReady = true;
+
+    window.addEventListener('beforeinstallprompt', (event) => {
+      event.preventDefault();
+      deferredInstallPrompt = event;
+      $('#install-app-btn')?.classList.remove('hidden');
+    });
+
+    window.addEventListener('appinstalled', () => {
+      deferredInstallPrompt = null;
+      $('#install-app-btn')?.classList.add('hidden');
+      showToast('BitMask installed. You can open it from your apps.', 'success');
+    });
+  }
+
   function updatePeerIdDisplay() {
     $('#peer-id-display').textContent = formatPeerId(peerId);
     $('#peer-id-raw').textContent = peerId;
+  }
+
+  async function refreshLocalFingerprint() {
+    if (!publicKeyBase64) {
+      localFingerprint = null;
+      return null;
+    }
+    localFingerprint = await BitMaskCrypto.fingerprintPublicKey(publicKeyBase64);
+    return localFingerprint;
   }
 
   // ══════════════════════════════════════════════════════════
@@ -137,14 +182,16 @@ const BitMaskApp = (() => {
 
       try {
         const identity = await BitMaskIdentity.unlockWithPassphrase(passphrase);
-        peerId = identity.peerId;
-        keyPair = identity.keyPair;
-        publicKeyBase64 = identity.publicKeyBase64;
+         peerId = identity.peerId;
+         keyPair = identity.keyPair;
+         publicKeyBase64 = identity.publicKeyBase64;
+         await refreshLocalFingerprint();
 
         // Continue normal init
         updatePeerIdDisplay();
         syncSoundToggle();
         syncRememberMeToggle();
+        setupInstallPrompt();
         setupSocketHandlers();
         setupUIHandlers();
         setupModalHandlers();
@@ -152,6 +199,7 @@ const BitMaskApp = (() => {
         BitMaskSocket.connect();
         showView('landing-view');
         registerServiceWorker();
+        setTimeout(checkUrlHash, 700);
         showToast('Identity unlocked!', 'success');
         BitMaskSound.playConnect();
       } catch (err) {
@@ -169,6 +217,7 @@ const BitMaskApp = (() => {
       updatePeerIdDisplay();
       syncSoundToggle();
       syncRememberMeToggle();
+      setupInstallPrompt();
       setupSocketHandlers();
       setupUIHandlers();
       setupModalHandlers();
@@ -176,6 +225,7 @@ const BitMaskApp = (() => {
       BitMaskSocket.connect();
       showView('landing-view');
       registerServiceWorker();
+      setTimeout(checkUrlHash, 700);
       showToast('Started with a fresh identity.', 'info');
     });
   }
@@ -185,25 +235,62 @@ const BitMaskApp = (() => {
   // ══════════════════════════════════════════════════════════
 
   function setupSocketHandlers() {
-    BitMaskSocket.on('onConnect', async () => {
+    BitMaskSocket.on('onConnect', async ({ reconnected = false } = {}) => {
       updateStatus('online');
       updateChatSessionStatus('online');
+      updateRetryButtons(false);
+      reconnectToastShown = false;
       startQualityMonitor();
       try {
         await BitMaskSocket.register(peerId, publicKeyBase64);
-        showToast('Identity secured. You are online.', 'success');
+        if (reconnected) {
+          showToast('Connection restored. Rejoining your secure session…', 'success');
+          await restoreActiveSession();
+        } else {
+          showToast('Identity secured. You are online.', 'success');
+        }
       } catch (err) {
         showToast(err.message, 'error');
+        updateRetryButtons(true);
       }
+    });
+
+    BitMaskSocket.on('onReconnecting', (attempt) => {
+      updateStatus('reconnecting');
+      updateChatSessionStatus('reconnecting');
+      updateRetryButtons(true);
+      const attemptLabel = Number.isFinite(attempt) ? ` Attempt ${attempt}.` : '';
+      if (!reconnectToastShown) {
+        showToast(`Connection lost. Reconnecting…${attemptLabel}`, 'warning');
+        reconnectToastShown = true;
+      }
+    });
+
+    BitMaskSocket.on('onReconnectFailed', () => {
+      updateStatus('offline');
+      updateChatSessionStatus('offline');
+      updateRetryButtons(true);
+      showToast('Automatic reconnect is still unavailable. Try again when your network is ready.', 'warning');
     });
 
     BitMaskSocket.on('onDisconnect', () => {
       updateStatus('offline');
       updateChatSessionStatus('offline');
+      updateRetryButtons(true);
       stopQualityMonitor();
       window.BitMaskCall?.handleTransportDisconnect();
       BitMaskSound.playDisconnect();
-      showToast('Connection lost. Reconnecting...', 'warning');
+      if (!reconnectToastShown) {
+        showToast('Connection lost. Reconnecting…', 'warning');
+        reconnectToastShown = true;
+      }
+    });
+
+    BitMaskSocket.on('onReconnectError', (message) => {
+      updateStatus('reconnecting');
+      updateChatSessionStatus('reconnecting');
+      updateRetryButtons(true);
+      console.info('[BitMask] Reconnect attempt failed:', message);
     });
 
     // ── 1:1 Peer Connected (incoming connection) ──
@@ -213,6 +300,8 @@ const BitMaskApp = (() => {
         sharedKey = await BitMaskCrypto.deriveSharedKey(keyPair.privateKey, peerPubKey);
         currentRoomId = data.roomId;
         connectedPeerId = data.peerId;
+        connectedPeerPublicKey = data.peerPublicKey;
+        connectedPeerFingerprint = await BitMaskCrypto.fingerprintPublicKey(data.peerPublicKey);
         isGroupChat = false;
         switchToChat(data.peerId);
         BitMaskSound.playConnect();
@@ -225,6 +314,10 @@ const BitMaskApp = (() => {
     // ── 1:1 Peer Disconnected ──
     BitMaskSocket.on('onPeerDisconnected', () => {
       if (isGroupChat) return; // groups use peer-left
+      if (!BitMaskSocket.isConnected()) {
+        addSystemMessage('Peer connection interrupted. Waiting for the secure session to return…');
+        return;
+      }
       window.BitMaskCall?.hangup(false);
       addSystemMessage('Peer disconnected. Messages self-destructing...');
       BitMaskSound.playDisconnect();
@@ -241,6 +334,8 @@ const BitMaskApp = (() => {
 
       groupMembers.set(data.peerId, { publicKey: data.publicKey });
       updateMemberCount(data.memberCount);
+      updateRoomControlsUI();
+      renderMembersList();
       addSystemMessage(`${data.peerId.slice(0, 8)}... joined the room.`);
       BitMaskSound.playConnect();
 
@@ -267,6 +362,8 @@ const BitMaskApp = (() => {
       typingPeers.delete(data.peerId);
       updateTypingIndicator();
       updateMemberCount(data.memberCount);
+      updateRoomControlsUI();
+      renderMembersList();
       addSystemMessage(`${data.peerId.slice(0, 8)}... left the room.`);
       BitMaskSound.playDisconnect();
     });
@@ -290,10 +387,33 @@ const BitMaskApp = (() => {
     // ── Group: Host Changed ──
     BitMaskSocket.on('onHostChanged', (data) => {
       if (data.roomId !== currentRoomId) return;
-      isHost = (data.newHost === peerId);
+      roomHostPeerId = data.newHost;
+      isHost = (roomHostPeerId === peerId);
+      updateRoomControlsUI();
+      renderMembersList();
       if (isHost) {
         addSystemMessage('You are now the room host.');
       }
+    });
+
+    // ── Group: Room Closed / Member Removed ──
+    BitMaskSocket.on('onRoomClosed', (data) => {
+      if (!isGroupChat || data.roomId !== currentRoomId) return;
+      closeModal('room-controls-modal');
+      destroyAllMessages();
+      switchToLanding();
+      resetChatState();
+      showToast('The room was closed by the host.', 'info');
+    });
+
+    BitMaskSocket.on('onRoomMemberRemoved', (data) => {
+      if (!isGroupChat || data.roomId !== currentRoomId || data.peerId !== peerId) return;
+      closeModal('members-modal');
+      closeModal('room-controls-modal');
+      destroyAllMessages();
+      switchToLanding();
+      resetChatState();
+      showToast('You were removed from the room by the host.', 'warning');
     });
 
     // ── Incoming Message ──
@@ -320,7 +440,13 @@ const BitMaskApp = (() => {
       const metadata = normalizeFileMetadata(data.metadata);
       const chunkCount = Number(data.chunkCount);
       if (!Number.isInteger(chunkCount) || chunkCount < 1 || chunkCount > 128) return;
-      const timeoutId = setTimeout(() => incomingFileTransfers.delete(data.id), Math.max(5000, Number(data.ttl) || messageTTL));
+      const progress = createIncomingTransferProgress(metadata, chunkCount);
+      const transferTtl = Number(data.ttl) > 0 ? Number(data.ttl) : 86400000;
+      const timeoutId = transferTtl > 0 ? setTimeout(() => {
+        removeTransferProgress(progress);
+        incomingFileTransfers.delete(data.id);
+        addSystemMessage(`Timed out receiving ${metadata.name}.`);
+      }, transferTtl) : null;
       incomingFileTransfers.set(data.id, {
         metadata,
         ttl: data.ttl,
@@ -329,6 +455,7 @@ const BitMaskApp = (() => {
         chunks: new Array(chunkCount),
         received: 0,
         timeoutId,
+        progress,
       });
     });
 
@@ -339,6 +466,7 @@ const BitMaskApp = (() => {
       if (index < 0 || index >= transfer.chunkCount || transfer.chunks[index]) return;
       transfer.chunks[index] = { cipher: data.cipher, nonce: data.nonce };
       transfer.received += 1;
+      updateTransferProgress(transfer.progress, transfer.received / transfer.chunkCount * 100, `Receiving encrypted media · ${transfer.received}/${transfer.chunkCount}`);
     });
 
     BitMaskSocket.on('onFileComplete', async (data) => {
@@ -346,6 +474,7 @@ const BitMaskApp = (() => {
       if (!transfer) return;
       clearTimeout(transfer.timeoutId);
       incomingFileTransfers.delete(data.id);
+      removeTransferProgress(transfer.progress);
 
       const key = isGroupChat ? groupKey : sharedKey;
       if (!key || transfer.received !== transfer.chunkCount || transfer.chunks.some(chunk => !chunk)) {
@@ -363,6 +492,15 @@ const BitMaskApp = (() => {
         console.error('Chunked file decryption failed:', err);
         addSystemMessage('Failed to decrypt incoming media.');
       }
+    });
+
+    BitMaskSocket.on('onFileCancelled', (data) => {
+      const transfer = incomingFileTransfers.get(data.id);
+      if (!transfer) return;
+      clearTimeout(transfer.timeoutId);
+      incomingFileTransfers.delete(data.id);
+      removeTransferProgress(transfer.progress);
+      addSystemMessage(`Transfer cancelled: ${transfer.metadata.name}`);
     });
 
     // ── Incoming File ──
@@ -413,6 +551,46 @@ const BitMaskApp = (() => {
     });
   }
 
+  async function restoreActiveSession() {
+    if (reconnectInProgress || !currentRoomId) return;
+    reconnectInProgress = true;
+
+    try {
+      if (isGroupChat && roomCode) {
+        const res = await BitMaskSocket.joinRoom(roomCode);
+        currentRoomId = res.roomId;
+        roomHostPeerId = res.host;
+        isHost = roomHostPeerId === peerId;
+        groupMembers.clear();
+        for (const member of res.members || []) {
+          groupMembers.set(member.peerId, { publicKey: member.publicKey });
+        }
+        groupMembers.set(peerId, { publicKey: publicKeyBase64 });
+        updateMemberCount(groupMembers.size);
+        updateChatSessionStatus('online');
+        addSystemMessage('Secure group connection restored.');
+      } else if (connectedPeerId) {
+        const res = await BitMaskSocket.connectToPeer(connectedPeerId);
+        const peerPubKey = await BitMaskCrypto.importPublicKey(res.peerPublicKey);
+        sharedKey = await BitMaskCrypto.deriveSharedKey(keyPair.privateKey, peerPubKey);
+        currentRoomId = res.roomId;
+        connectedPeerPublicKey = res.peerPublicKey;
+        connectedPeerFingerprint = await BitMaskCrypto.fingerprintPublicKey(res.peerPublicKey);
+        updateFingerprintUI();
+        updateChatSessionStatus('online');
+        addSystemMessage('Secure direct connection restored.');
+      }
+      updateRetryButtons(false);
+    } catch (err) {
+      updateStatus('offline');
+      updateChatSessionStatus('offline');
+      updateRetryButtons(true);
+      showToast(`Session restore failed: ${err.message}`, 'warning');
+    } finally {
+      reconnectInProgress = false;
+    }
+  }
+
   // ══════════════════════════════════════════════════════════
   //  UI EVENT HANDLERS
   // ══════════════════════════════════════════════════════════
@@ -428,31 +606,73 @@ const BitMaskApp = (() => {
       });
     });
 
-    // ── QR Code ──
-    $('#qr-btn').addEventListener('click', () => {
-      const svg = BitMaskQR.toSVG(peerId, {
-        size: 360,
-        margin: 4,
-        darkColor: '#07111f',
-        lightColor: '#ffffff',
-      });
-      $('#qr-container').innerHTML = svg;
+    // ── Expiring one-time peer QR invite ──
+    $('#qr-btn').addEventListener('click', async () => {
       $('#qr-peer-id').textContent = formatPeerId(peerId);
+      $('#qr-container').innerHTML = '<span class="qr-loading-label">Creating secure invite…</span>';
+      $('#qr-expiry-status').textContent = 'Creating secure invite…';
       openModal('qr-modal');
+      await renderPeerInviteQr(Number($('#qr-expiry-select').value) || 300000);
     });
 
-    // ── QR Copy Button ──
-    $('#qr-copy-btn').addEventListener('click', () => {
-      navigator.clipboard.writeText(peerId).then(() => {
-        const btn = $('#qr-copy-btn');
-        btn.textContent = 'Copied!';
-        setTimeout(() => btn.textContent = 'Copy peer ID', 1500);
-      });
+    $('#qr-expiry-select').addEventListener('change', () => {
+      if (!$('#qr-modal').classList.contains('hidden')) {
+        renderPeerInviteQr(Number($('#qr-expiry-select').value) || 300000);
+      }
+    });
+
+    $('#qr-refresh-btn').addEventListener('click', () => {
+      renderPeerInviteQr(Number($('#qr-expiry-select').value) || 300000);
+    });
+
+    // ── QR invite link copy ──
+    $('#qr-copy-btn').addEventListener('click', async () => {
+      if (!qrInvitePayload) {
+        showToast('Create a QR invite first.', 'warning');
+        return;
+      }
+      await copyText(buildInviteUrl(qrInvitePayload), $('#qr-copy-btn'), 'Copy invite link');
+    });
+
+    $('#qr-download-btn').addEventListener('click', () => {
+      downloadQrPng(qrInvitePayload, `bitmask-peer-invite-${peerId}.png`);
     });
 
     // ── QR scanner ──
     $('#scan-qr-btn').addEventListener('click', () => {
       openQrScanner();
+    });
+
+    // ── Connection retry ──
+    ['#retry-connection-btn', '#chat-retry-btn'].forEach(selector => {
+      $(selector).addEventListener('click', () => {
+        updateStatus('reconnecting');
+        updateChatSessionStatus('reconnecting');
+        updateRetryButtons(true);
+        BitMaskSocket.reconnect();
+      });
+    });
+
+    // ── Peer fingerprint verification ──
+    $('#peer-verify-btn').addEventListener('click', () => {
+      openFingerprintModal();
+    });
+    $('#mark-peer-verified-btn').addEventListener('click', togglePeerVerification);
+    $('#copy-peer-fingerprint-btn').addEventListener('click', () => {
+      copyText(connectedPeerFingerprint, $('#copy-peer-fingerprint-btn'), 'Copy peer fingerprint');
+    });
+    $('#copy-local-fingerprint-btn').addEventListener('click', () => {
+      copyText(localFingerprint, $('#copy-local-fingerprint-btn'), 'Copy your fingerprint');
+    });
+
+    $('#install-app-btn').addEventListener('click', async () => {
+      if (!deferredInstallPrompt) return;
+      deferredInstallPrompt.prompt();
+      const result = await deferredInstallPrompt.userChoice;
+      if (result.outcome === 'accepted') {
+        $('#install-app-btn').classList.add('hidden');
+      }
+      deferredInstallPrompt = null;
     });
 
     // ── Sound Toggle ──
@@ -493,13 +713,17 @@ const BitMaskApp = (() => {
       const btn = $('#connect-btn');
       btn.disabled = true;
       btn.innerHTML = '<span class="spinner"></span> Connecting...';
+      const inviteToken = pendingInviteToken;
+      pendingInviteToken = null;
 
       try {
-        const res = await BitMaskSocket.connectToPeer(targetId);
+        const res = await BitMaskSocket.connectToPeer(targetId, inviteToken);
         const peerPubKey = await BitMaskCrypto.importPublicKey(res.peerPublicKey);
         sharedKey = await BitMaskCrypto.deriveSharedKey(keyPair.privateKey, peerPubKey);
         currentRoomId = res.roomId;
         connectedPeerId = targetId;
+        connectedPeerPublicKey = res.peerPublicKey;
+        connectedPeerFingerprint = await BitMaskCrypto.fingerprintPublicKey(res.peerPublicKey);
         isGroupChat = false;
         switchToChat(targetId);
         BitMaskSound.playConnect();
@@ -524,12 +748,14 @@ const BitMaskApp = (() => {
         roomCode = res.roomCode;
         isGroupChat = true;
         isHost = true;
+        roomHostPeerId = peerId;
         groupMembers.clear();
         groupMembers.set(peerId, { publicKey: publicKeyBase64 });
 
         // Show room created modal
         $('#room-code-display').textContent = roomCode;
         openModal('room-created-modal');
+        await renderRoomInviteQr(600000);
       } catch (err) {
         showToast(err.message, 'error');
       } finally {
@@ -554,6 +780,22 @@ const BitMaskApp = (() => {
       }
     });
 
+    $('#copy-room-invite-btn').addEventListener('click', () => {
+      if (!roomInvitePayload) {
+        showToast('Create a room invite first.', 'warning');
+        return;
+      }
+      copyText(buildInviteUrl(roomInvitePayload), $('#copy-room-invite-btn'), 'Copy invite link');
+    });
+
+    $('#download-room-invite-btn').addEventListener('click', () => {
+      downloadQrPng(roomInvitePayload, `bitmask-room-invite-${roomCode || 'room'}.png`);
+    });
+
+    $('#refresh-room-invite-btn').addEventListener('click', () => {
+      renderRoomInviteQr(600000);
+    });
+
     // ── Join Group Room ──
     $('#join-group-form').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -568,13 +810,16 @@ const BitMaskApp = (() => {
       const btn = $('#join-group-btn');
       btn.disabled = true;
       btn.innerHTML = '<span class="spinner"></span> Joining...';
+      const inviteToken = pendingInviteToken;
+      pendingInviteToken = null;
 
       try {
-        const res = await BitMaskSocket.joinRoom(code);
+        const res = await BitMaskSocket.joinRoom(code, inviteToken);
         currentRoomId = res.roomId;
         roomCode = res.roomCode;
         isGroupChat = true;
-        isHost = false;
+        roomHostPeerId = res.host;
+        isHost = roomHostPeerId === peerId;
         groupMembers.clear();
 
         // Store existing members
@@ -633,6 +878,16 @@ const BitMaskApp = (() => {
 
     $('#cancel-reply-btn').addEventListener('click', clearReplyTarget);
 
+    // ── Session details / room controls ──
+    $('#chat-details-btn').addEventListener('click', () => {
+      if (isGroupChat) {
+        updateRoomControlsUI();
+        openModal('room-controls-modal');
+      } else {
+        openFingerprintModal();
+      }
+    });
+
     $('#messages-container').addEventListener('click', (event) => {
       const action = event.target.closest('[data-message-action]');
       if (!action) return;
@@ -665,15 +920,8 @@ const BitMaskApp = (() => {
       typingTimeout = setTimeout(cancelTyping, 2000);
     });
 
-    // ── TTL selector ──
-    $$('.ttl-option').forEach(btn => {
-      btn.addEventListener('click', () => {
-        $$('.ttl-option').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        messageTTL = parseInt(btn.dataset.ttl);
-        showToast(`Messages self-destruct in ${btn.textContent}`, 'info');
-      });
-    });
+    // ── Self-destruct interval dropdown ──
+    setupTtlSelector();
 
     // ── Leave / Disconnect ──
     $('#leave-btn').addEventListener('click', () => {
@@ -719,6 +967,28 @@ const BitMaskApp = (() => {
       openModal('members-modal');
     });
 
+    $('#copy-room-details-btn').addEventListener('click', () => {
+      if (!roomCode) return;
+      const inviteUrl = `${window.location.origin}/#room=${roomCode}`;
+      copyText(inviteUrl, $('#copy-room-details-btn'), 'Copy room link');
+    });
+
+    $('#room-leave-btn').addEventListener('click', () => leaveCurrentRoom());
+    $('#room-close-btn').addEventListener('click', async () => {
+      if (!isGroupChat || !isHost || !currentRoomId) return;
+      if (!confirm('Close this room for everyone?')) return;
+      try {
+        await BitMaskSocket.closeRoom(currentRoomId);
+        closeModal('room-controls-modal');
+        destroyAllMessages();
+        switchToLanding();
+        resetChatState();
+        showToast('Room closed.', 'success');
+      } catch (err) {
+        showToast(`Could not close room: ${err.message}`, 'error');
+      }
+    });
+
     // ── New Identity ──
     $('#new-identity-btn').addEventListener('click', async () => {
       BitMaskIdentity.clear();
@@ -758,6 +1028,189 @@ const BitMaskApp = (() => {
     $('#call-hangup-btn').addEventListener('click', () => {
       window.BitMaskCall.hangup();
     });
+
+    $('#call-diagnostics-btn').addEventListener('click', () => {
+      window.BitMaskCall.toggleDiagnostics();
+    });
+  }
+
+  async function renderPeerInviteQr(ttlMs) {
+    try {
+      const invite = await BitMaskSocket.createInvite('peer', { ttlMs });
+      qrInviteToken = invite.token;
+      qrInvitePayload = invite.payload;
+      qrInviteExpiresAt = invite.expiresAt;
+      $('#qr-container').innerHTML = BitMaskQR.toSVG(invite.payload, {
+        size: 360,
+        margin: 4,
+        darkColor: '#07111f',
+        lightColor: '#ffffff',
+      });
+      $('#qr-peer-id').textContent = formatPeerId(peerId);
+      startInviteExpiryTimer('qr', invite.expiresAt);
+    } catch (err) {
+      qrInviteToken = null;
+      qrInvitePayload = null;
+      qrInviteExpiresAt = null;
+      $('#qr-container').innerHTML = '<span class="qr-loading-label">Secure invite unavailable</span>';
+      $('#qr-expiry-status').textContent = err.message;
+      showToast(`Could not create QR invite: ${err.message}`, 'error');
+    }
+  }
+
+  async function renderRoomInviteQr(ttlMs) {
+    if (!currentRoomId || !roomCode) return;
+    try {
+      const invite = await BitMaskSocket.createInvite('room', { roomId: currentRoomId, ttlMs });
+      roomInviteToken = invite.token;
+      roomInvitePayload = invite.payload;
+      roomInviteExpiresAt = invite.expiresAt;
+      $('#room-invite-qr-container').innerHTML = BitMaskQR.toSVG(invite.payload, {
+        size: 180,
+        margin: 4,
+        darkColor: '#07111f',
+        lightColor: '#ffffff',
+      });
+      startInviteExpiryTimer('room', invite.expiresAt);
+    } catch (err) {
+      roomInviteToken = null;
+      roomInvitePayload = null;
+      roomInviteExpiresAt = null;
+      $('#room-invite-qr-container').innerHTML = '<span class="qr-loading-label">Room invite unavailable</span>';
+      $('#room-invite-expiry-status').textContent = err.message;
+      showToast(`Could not create room QR invite: ${err.message}`, 'error');
+    }
+  }
+
+  function startInviteExpiryTimer(kind, expiresAt) {
+    stopInviteExpiryTimer();
+    const update = () => {
+      const remaining = Number(expiresAt) - Date.now();
+      const status = kind === 'room' ? $('#room-invite-expiry-status') : $('#qr-expiry-status');
+      if (!status) return;
+      if (remaining <= 0) {
+        status.textContent = 'Expired — create a new one-time invite.';
+        if (kind === 'room') {
+          roomInviteToken = null;
+          roomInvitePayload = null;
+        } else {
+          qrInviteToken = null;
+          qrInvitePayload = null;
+        }
+        stopInviteExpiryTimer();
+        return;
+      }
+      status.textContent = `One-time invite · expires in ${formatCountdown(remaining)}`;
+    };
+    update();
+    inviteExpiryTimer = setInterval(update, 1000);
+  }
+
+  function stopInviteExpiryTimer() {
+    if (inviteExpiryTimer) clearInterval(inviteExpiryTimer);
+    inviteExpiryTimer = null;
+  }
+
+  function buildInviteUrl(payload) {
+    return `${window.location.origin}/#invite=${payload}`;
+  }
+
+  async function copyText(value, button, defaultLabel) {
+    if (!value) {
+      showToast('Nothing to copy yet.', 'warning');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(value);
+      if (button) {
+        button.textContent = 'Copied!';
+        setTimeout(() => { button.textContent = defaultLabel; }, 1500);
+      }
+      showToast('Copied to clipboard.', 'success');
+    } catch {
+      showToast('Clipboard access was unavailable.', 'error');
+    }
+  }
+
+  function downloadQrPng(payload, filename) {
+    if (!payload) {
+      showToast('Create a QR invite first.', 'warning');
+      return;
+    }
+    const canvas = document.createElement('canvas');
+    try {
+      BitMaskQR.toCanvas(payload, canvas, {
+        size: 720,
+        margin: 18,
+        darkColor: '#07111f',
+        lightColor: '#ffffff',
+      });
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          showToast('Could not create the QR image.', 'error');
+          return;
+        }
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = filename;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(url);
+        showToast('QR image downloaded.', 'success');
+      }, 'image/png');
+    } catch (err) {
+      showToast(`Could not create QR image: ${err.message}`, 'error');
+    }
+  }
+
+  function updateRetryButtons(visible) {
+    ['#retry-connection-btn', '#chat-retry-btn'].forEach(selector => {
+      $(selector)?.classList.toggle('hidden', !visible);
+    });
+  }
+
+  function updateFingerprintUI() {
+    const button = $('#peer-verify-btn');
+    if (!button) return;
+    const verified = connectedPeerId && connectedPeerFingerprint && localFingerprint
+      ? BitMaskIdentity.getVerifiedPeer(connectedPeerId, connectedPeerFingerprint, localFingerprint)
+      : null;
+    button.classList.toggle('verified', !!verified);
+    const label = button.querySelector('#peer-verify-label');
+    if (label) label.textContent = verified ? 'Verified' : 'Verify';
+    else button.textContent = verified ? 'Verified' : 'Verify';
+    button.setAttribute('aria-label', verified ? 'View verified peer fingerprint' : 'View and verify this peer fingerprint');
+  }
+
+  function openFingerprintModal() {
+    if (!connectedPeerId || !connectedPeerFingerprint) {
+      showToast('Peer fingerprint is not ready yet.', 'warning');
+      return;
+    }
+    $('#peer-fingerprint-value').textContent = formatFingerprint(connectedPeerFingerprint);
+    $('#local-fingerprint-value').textContent = formatFingerprint(localFingerprint);
+    const verified = BitMaskIdentity.getVerifiedPeer(connectedPeerId, connectedPeerFingerprint, localFingerprint);
+    $('#fingerprint-verification-state').textContent = verified
+      ? `Verified on this device · ${new Date(verified.verifiedAt).toLocaleDateString()}`
+      : 'Not verified on this device.';
+    $('#mark-peer-verified-btn').textContent = verified ? 'Remove verification' : 'Mark as verified';
+    openModal('fingerprint-modal');
+  }
+
+  function togglePeerVerification() {
+    if (!connectedPeerId || !connectedPeerFingerprint || !localFingerprint) return;
+    const verified = BitMaskIdentity.getVerifiedPeer(connectedPeerId, connectedPeerFingerprint, localFingerprint);
+    if (verified) {
+      BitMaskIdentity.clearVerifiedPeer(connectedPeerId);
+      showToast('Peer verification removed from this device.', 'info');
+    } else {
+      BitMaskIdentity.setVerifiedPeer(connectedPeerId, connectedPeerFingerprint, localFingerprint);
+      showToast('Peer marked as verified on this device.', 'success');
+    }
+    updateFingerprintUI();
+    openFingerprintModal();
   }
 
   // ══════════════════════════════════════════════════════════
@@ -886,6 +1339,7 @@ const BitMaskApp = (() => {
         peerId = identity.peerId;
         keyPair = identity.keyPair;
         publicKeyBase64 = identity.publicKeyBase64;
+        await refreshLocalFingerprint();
 
         // Save & re-register
         await BitMaskIdentity.save(peerId, keyPair, publicKeyBase64);
@@ -945,6 +1399,77 @@ const BitMaskApp = (() => {
   //  FILE SHARING HANDLERS
   // ══════════════════════════════════════════════════════════
 
+  function createTransferProgressCard(title, incoming = false) {
+    const el = addSystemMessage('');
+    el.classList.add('transfer-progress-card', incoming ? 'incoming-transfer' : 'outgoing-transfer');
+
+    const heading = document.createElement('div');
+    heading.className = 'transfer-progress-heading';
+    heading.textContent = title;
+
+    const progress = document.createElement('progress');
+    progress.className = 'transfer-progress-bar';
+    progress.max = 100;
+    progress.value = 0;
+
+    const status = document.createElement('span');
+    status.className = 'transfer-progress-status';
+    status.textContent = incoming ? 'Preparing encrypted media…' : 'Preparing…';
+
+    const actions = document.createElement('div');
+    actions.className = 'transfer-progress-actions';
+
+    el.append(heading, progress, status, actions);
+    return { el, progress, status, actions };
+  }
+
+  function createIncomingTransferProgress(metadata, chunkCount) {
+    const card = createTransferProgressCard(`Receiving ${metadata.name}`, true);
+    updateTransferProgress(card, 0, `Receiving encrypted media · 0/${chunkCount}`);
+    return card;
+  }
+
+  function updateTransferProgress(card, percent, statusText) {
+    if (!card) return;
+    card.progress.value = Math.max(0, Math.min(100, Number(percent) || 0));
+    if (statusText) card.status.textContent = statusText;
+  }
+
+  function removeTransferProgress(card) {
+    if (card?.el?.parentNode) card.el.remove();
+  }
+
+  function markTransferCancelled(card) {
+    if (!card) return;
+    card.el.classList.add('cancelled');
+    card.status.textContent = 'Transfer cancelled.';
+    card.actions.replaceChildren();
+    const dismiss = document.createElement('button');
+    dismiss.type = 'button';
+    dismiss.className = 'message-action';
+    dismiss.textContent = 'Dismiss';
+    dismiss.addEventListener('click', () => removeTransferProgress(card));
+    card.actions.appendChild(dismiss);
+  }
+
+  function markTransferFailed(card, message, retry) {
+    if (!card) return;
+    card.el.classList.add('failed');
+    card.status.textContent = message;
+    card.actions.replaceChildren();
+    const retryButton = document.createElement('button');
+    retryButton.type = 'button';
+    retryButton.className = 'message-action';
+    retryButton.textContent = 'Retry';
+    retryButton.addEventListener('click', retry);
+    const dismiss = document.createElement('button');
+    dismiss.type = 'button';
+    dismiss.className = 'message-action';
+    dismiss.textContent = 'Dismiss';
+    dismiss.addEventListener('click', () => removeTransferProgress(card));
+    card.actions.append(retryButton, dismiss);
+  }
+
   function setupFileHandlers() {
     const fileInput = $('#file-input');
     const attachBtn = $('#file-attach-btn');
@@ -967,14 +1492,17 @@ const BitMaskApp = (() => {
     $('#view-once-btn').addEventListener('click', () => {
       isViewOnceActive = !isViewOnceActive;
       $('#view-once-btn').classList.toggle('active', isViewOnceActive);
+      $('#view-once-btn').setAttribute('aria-pressed', String(isViewOnceActive));
       showToast(
         isViewOnceActive ? 'View Once Mode ON (Media destroys after 1 view)' : 'View Once Mode OFF',
         isViewOnceActive ? 'info' : 'warning'
       );
     });
 
-    async function sendFile(file) {
+    async function sendFile(file, options = {}) {
       if (!file) return;
+
+      const viewOnceRequested = options.viewOnceRequested ?? isViewOnceActive;
 
       if (file.size > MAX_SOURCE_SIZE) {
         showToast('File too large. Maximum source size is 50MB.', 'error');
@@ -987,14 +1515,26 @@ const BitMaskApp = (() => {
         return;
       }
 
-      const sendingMsg = addSystemMessage(`Preparing ${file.name || 'file'}…`);
+      const controller = new AbortController();
+      const progress = createTransferProgressCard(`Sending ${file.name || 'file'}`);
+      const cancelButton = document.createElement('button');
+      cancelButton.type = 'button';
+      cancelButton.className = 'message-action';
+      cancelButton.textContent = 'Cancel';
+      cancelButton.addEventListener('click', () => {
+        controller.abort();
+        cancelButton.disabled = true;
+        progress.status.textContent = 'Cancelling transfer…';
+      });
+      progress.actions.appendChild(cancelButton);
+      let transferId = null;
+
       try {
         const preparedFile = await prepareFileForSending(file, (message) => {
-          if (sendingMsg?.parentNode) sendingMsg.textContent = message;
+          progress.status.textContent = message;
         });
         if (preparedFile.size > MAX_SIZE) {
-          showToast('File is still larger than the 25MB transfer limit after optimization.', 'error');
-          return;
+          throw new Error('File is still larger than the 25MB transfer limit after optimization.');
         }
         const buffer = await preparedFile.arrayBuffer();
         const mimeType = preparedFile.type || guessMimeType(preparedFile.name);
@@ -1006,31 +1546,40 @@ const BitMaskApp = (() => {
           size: preparedFile.size,
           originalSize: file.size,
           optimized: preparedFile.size < file.size,
-          viewOnce: isViewOnceActive && canViewOnce,
+          viewOnce: viewOnceRequested && canViewOnce,
         };
 
-        if (isViewOnceActive && !canViewOnce) {
+        if (viewOnceRequested && !canViewOnce) {
           showToast('View Once is available for images, video, and audio.', 'warning');
         }
 
         // Reset view once mode state
-        if (isViewOnceActive) {
-          isViewOnceActive = false;
-          $('#view-once-btn').classList.remove('active');
-        }
+          if (isViewOnceActive) {
+            isViewOnceActive = false;
+            $('#view-once-btn').classList.remove('active');
+            $('#view-once-btn').setAttribute('aria-pressed', 'false');
+          }
 
-        if (sendingMsg?.parentNode) sendingMsg.textContent = 'Encrypting media…';
+        progress.status.textContent = 'Encrypting media…';
         const encryptedChunks = await BitMaskCrypto.encryptFileChunks(
           key,
           buffer,
           CHUNK_SIZE,
           (completed, total) => {
-            if (sendingMsg?.parentNode) sendingMsg.textContent = `Encrypting media · ${completed}/${total}`;
-          }
+            updateTransferProgress(progress, completed / total * 45, `Encrypting media · ${completed}/${total}`);
+          },
+          controller.signal,
         );
         const res = await BitMaskSocket.startFile(currentRoomId, metadata, messageTTL, encryptedChunks.length);
+        transferId = res.msgId;
+        updateTransferProgress(progress, 45, `Sending encrypted media · 0/${encryptedChunks.length}`);
 
         for (let index = 0; index < encryptedChunks.length; index++) {
+          if (controller.signal.aborted) {
+            const cancelError = new Error('File transfer cancelled.');
+            cancelError.name = 'AbortError';
+            throw cancelError;
+          }
           await BitMaskSocket.sendFileChunk(
             currentRoomId,
             res.msgId,
@@ -1038,7 +1587,7 @@ const BitMaskApp = (() => {
             encryptedChunks[index].cipher,
             encryptedChunks[index].nonce,
           );
-          if (sendingMsg?.parentNode) sendingMsg.textContent = `Sending media · ${index + 1}/${encryptedChunks.length}`;
+          updateTransferProgress(progress, 45 + ((index + 1) / encryptedChunks.length * 55), `Sending encrypted media · ${index + 1}/${encryptedChunks.length}`);
         }
         await BitMaskSocket.completeFile(currentRoomId, res.msgId);
 
@@ -1047,10 +1596,22 @@ const BitMaskApp = (() => {
         const url = URL.createObjectURL(blob);
         renderFileMessage(res.msgId, metadata, url, 'outgoing', messageTTL);
         BitMaskSound.playOutgoing();
+        updateTransferProgress(progress, 100, 'Sent securely.');
+        progress.actions.replaceChildren();
+        setTimeout(() => removeTransferProgress(progress), 900);
       } catch (err) {
+        if (transferId && controller.signal.aborted) {
+          await BitMaskSocket.cancelFile(currentRoomId, transferId).catch(() => {});
+        }
+        if (controller.signal.aborted || err.name === 'AbortError') {
+          markTransferCancelled(progress);
+          return;
+        }
+        markTransferFailed(progress, `Transfer failed: ${err.message}`, () => {
+          removeTransferProgress(progress);
+          sendFile(file, { viewOnceRequested });
+        });
         showToast('Failed to send file: ' + err.message, 'error');
-      } finally {
-        if (sendingMsg && sendingMsg.parentNode) sendingMsg.remove();
       }
     }
 
@@ -1109,6 +1670,7 @@ const BitMaskApp = (() => {
     // 1:1 mode
     $('#chat-direct-info').classList.remove('hidden');
     $('#chat-group-info').classList.add('hidden');
+    $('#peer-verify-btn').classList.remove('hidden');
     $('#member-count-btn').classList.add('hidden');
 
     // Show Voice & Video Call Buttons
@@ -1116,6 +1678,7 @@ const BitMaskApp = (() => {
     $('#video-call-btn').classList.remove('hidden');
 
     $('#connected-peer-id').textContent = formatPeerId(remotePeerId);
+    updateFingerprintUI();
     $('#messages-container').innerHTML = `
       <div class="initial-session-banner">
         <div class="session-banner-icon">
@@ -1125,7 +1688,7 @@ const BitMaskApp = (() => {
           </svg>
         </div>
         <div class="session-banner-title">End-to-End Encrypted Session Established</div>
-        <div class="session-banner-sub">Messages self-destruct after <span class="ttl-tag">${formatTTL(messageTTL)}</span></div>
+        <div class="session-banner-sub">Self-destruct: <span class="ttl-tag">${formatTTL(messageTTL)}</span></div>
       </div>
     `;
     $('#message-input').focus();
@@ -1141,6 +1704,7 @@ const BitMaskApp = (() => {
     // Group mode
     $('#chat-direct-info').classList.add('hidden');
     $('#chat-group-info').classList.remove('hidden');
+    $('#peer-verify-btn').classList.add('hidden');
     $('#member-count-btn').classList.remove('hidden');
 
     // Hide Voice & Video Call Buttons
@@ -1148,7 +1712,12 @@ const BitMaskApp = (() => {
     $('#video-call-btn').classList.add('hidden');
 
     $('#group-room-code').textContent = roomCode;
+    connectedPeerId = null;
+    connectedPeerPublicKey = null;
+    connectedPeerFingerprint = null;
+    updateFingerprintUI();
     updateMemberCount(groupMembers.size);
+    updateRoomControlsUI();
     $('#messages-container').innerHTML = `
       <div class="initial-session-banner">
         <div class="session-banner-icon">
@@ -1171,12 +1740,17 @@ const BitMaskApp = (() => {
     sharedKey = null;
     currentRoomId = null;
     connectedPeerId = null;
+    connectedPeerPublicKey = null;
+    connectedPeerFingerprint = null;
     isGroupChat = false;
     groupKey = null;
     roomCode = null;
     isHost = false;
+    roomHostPeerId = null;
     groupMembers.clear();
     typingPeers.clear();
+    pendingInviteToken = null;
+    stopInviteExpiryTimer();
   }
 
   function switchToLanding() {
@@ -1198,7 +1772,10 @@ const BitMaskApp = (() => {
   }
 
   function clearIncomingFileTransfers() {
-    incomingFileTransfers.forEach(transfer => clearTimeout(transfer.timeoutId));
+    incomingFileTransfers.forEach(transfer => {
+      clearTimeout(transfer.timeoutId);
+      removeTransferProgress(transfer.progress);
+    });
     incomingFileTransfers.clear();
   }
 
@@ -1299,7 +1876,7 @@ const BitMaskApp = (() => {
       el.appendChild(createReplyReference(replyTo));
     }
 
-    const meta = createMessageMeta(ttl);
+    const meta = createMessageMeta(ttl, type);
     el.appendChild(content);
     appendMessageActions(el, msgId, text);
     el.appendChild(meta.el);
@@ -1458,7 +2035,7 @@ const BitMaskApp = (() => {
       bubble.appendChild(info);
     }
 
-    const meta = createMessageMeta(ttl);
+    const meta = createMessageMeta(ttl, type);
     el.appendChild(bubble);
     appendMessageActions(el, msgId, metadata.name);
     el.appendChild(meta.el);
@@ -1557,7 +2134,8 @@ const BitMaskApp = (() => {
     chip.className = 'message-reaction-chip';
     chip.textContent = label;
     reactions.appendChild(chip);
-    setTimeout(() => chip.remove(), Math.max(5000, Number(ttl) || messageTTL));
+    const reactionTtl = Number(ttl) || messageTTL;
+    if (reactionTtl > 0) setTimeout(() => chip.remove(), reactionTtl);
   }
 
   function decodeMessagePayload(plaintext) {
@@ -1571,7 +2149,7 @@ const BitMaskApp = (() => {
     return { kind: 'text', text: plaintext, replyTo: null };
   }
 
-  function createMessageMeta(ttl) {
+  function createMessageMeta(ttl, type = '') {
     const meta = document.createElement('div');
     meta.className = 'message-meta';
 
@@ -1585,9 +2163,18 @@ const BitMaskApp = (() => {
     const timer = document.createElement('span');
     timer.className = 'self-destruct-timer';
     timer.dataset.ttl = ttl;
+    timer.textContent = Number(ttl) > 0 ? '' : 'No expiry';
 
     meta.appendChild(lockIcon);
     meta.appendChild(time);
+    if (type.includes('outgoing')) {
+      const receipt = document.createElement('span');
+      receipt.className = 'message-receipt';
+      receipt.setAttribute('aria-label', 'Sent securely');
+      receipt.title = 'Sent securely';
+      receipt.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/><path d="m9 12 4 4L23 6"/></svg>';
+      meta.appendChild(receipt);
+    }
     meta.appendChild(timer);
 
     // Create the shrinking visual progress bar
@@ -1596,6 +2183,7 @@ const BitMaskApp = (() => {
     const progressBar = document.createElement('div');
     progressBar.className = 'destruct-progress-bar';
     progressContainer.appendChild(progressBar);
+    if (Number(ttl) <= 0) progressContainer.classList.add('hidden');
     meta.appendChild(progressContainer);
 
     return { el: meta, timerEl: timer, progressBarEl: progressBar };
@@ -1606,6 +2194,7 @@ const BitMaskApp = (() => {
   // ══════════════════════════════════════════════════════════
 
   function startSelfDestruct(msgId, el, timerEl, progressBarEl, ttl) {
+    if (!Number(ttl) || Number(ttl) <= 0) return;
     const endTime = Date.now() + ttl;
 
     // Trigger GPU-accelerated transition on progress bar (zero main-thread layout thrashing)
@@ -1718,8 +2307,11 @@ const BitMaskApp = (() => {
   function updateStatus(status) {
     const dot = $('#status-dot');
     const label = $('#status-label');
+    if (!dot || !label) return;
     dot.className = `status-dot ${status}`;
-    label.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+    label.textContent = status === 'reconnecting'
+      ? 'Reconnecting…'
+      : status.charAt(0).toUpperCase() + status.slice(1);
   }
 
   function updateChatSessionStatus(status) {
@@ -1727,8 +2319,9 @@ const BitMaskApp = (() => {
     const label = $('#chat-session-status-label');
     if (!statusEl || !label) return;
     const online = status === 'online';
-    statusEl.classList.toggle('offline', !online);
-    label.textContent = online ? 'Secure session' : 'Reconnecting…';
+    statusEl.classList.toggle('offline', status === 'offline');
+    statusEl.classList.toggle('reconnecting', status === 'reconnecting');
+    label.textContent = online ? 'Secure session' : status === 'offline' ? 'Offline' : 'Reconnecting…';
   }
 
   function startQualityMonitor() {
@@ -1918,7 +2511,7 @@ const BitMaskApp = (() => {
     }
   }
 
-  function handleScannedValue(rawValue) {
+  async function handleScannedValue(rawValue) {
     const result = parseScannedValue(rawValue);
     if (!result) {
       $('#qr-scanner-status').textContent = 'That QR code is not a BitMask peer or room code.';
@@ -1927,7 +2520,25 @@ const BitMaskApp = (() => {
 
     stopQrScanner();
     closeModal('qr-scanner-modal');
-    if (result.kind === 'peer') {
+    if (result.kind === 'invite') {
+      try {
+        const invite = await BitMaskSocket.redeemInvite(result.token);
+        pendingInviteToken = invite.token;
+        history.replaceState(null, document.title, `${window.location.pathname}${window.location.search}`);
+        if (invite.kind === 'peer') {
+          $('#target-peer-input').value = invite.value;
+          showToast('One-time peer invite accepted. Connecting…', 'success');
+          submitForm($('#connect-form'));
+        } else {
+          $('#room-code-input').value = invite.value;
+          showToast('One-time room invite accepted. Joining…', 'success');
+          submitForm($('#join-group-form'));
+        }
+      } catch (err) {
+        pendingInviteToken = null;
+        showToast(`Invite unavailable: ${err.message}`, 'error');
+      }
+    } else if (result.kind === 'peer') {
       $('#target-peer-input').value = result.value;
       showToast('Peer ID scanned. Connecting…', 'success');
       submitForm($('#connect-form'));
@@ -1960,6 +2571,14 @@ const BitMaskApp = (() => {
     }
 
     const hash = value.replace(/^#/, '');
+    const inviteMatch = hash.match(/^invite=(BM1\/[PR]\/[A-F0-9]{24})$/i);
+    if (inviteMatch) {
+      return parseScannedValue(inviteMatch[1]);
+    }
+    const payloadMatch = hash.match(/^BM1\/([PR])\/([A-F0-9]{24})$/i);
+    if (payloadMatch) {
+      return { kind: 'invite', token: payloadMatch[2].toUpperCase() };
+    }
     const peerMatch = hash.match(/^peer=([A-Fa-f0-9\s-]{16,24})$/i);
     if (peerMatch) value = peerMatch[1];
     const roomMatch = hash.match(/^room=([A-Za-z0-9]{6})$/i);
@@ -2022,7 +2641,13 @@ const BitMaskApp = (() => {
     return String(id).match(/.{1,4}/g).join(' - ');
   }
 
+  function formatFingerprint(value) {
+    if (!value) return '----';
+    return String(value).replace(/.{1,4}/g, '$& ').trim();
+  }
+
   function formatTTL(ms) {
+    if (!Number(ms)) return 'Off';
     if (ms < 60000) return `${ms / 1000}s`;
     if (ms < 3600000) return `${ms / 60000}m`;
     return `${ms / 3600000}h`;
@@ -2116,6 +2741,107 @@ const BitMaskApp = (() => {
     input.style.height = Math.min(input.scrollHeight, 160) + 'px';
   }
 
+  function setupTtlSelector() {
+    const selector = $('#ttl-selector');
+    const toggle = $('#ttl-toggle-btn');
+    const menu = $('#ttl-menu');
+    if (!selector || !toggle || !menu || selector.dataset.ready === 'true') return;
+    selector.dataset.ready = 'true';
+
+    const options = () => [...menu.querySelectorAll('.ttl-option')];
+    const closeMenu = (restoreFocus = false) => {
+      menu.classList.add('hidden');
+      toggle.setAttribute('aria-expanded', 'false');
+      if (restoreFocus) toggle.focus();
+    };
+    const openMenu = (focusActive = false) => {
+      menu.classList.remove('hidden');
+      toggle.setAttribute('aria-expanded', 'true');
+      if (focusActive) {
+        const active = options().find(option => option.classList.contains('active')) || options()[0];
+        active?.focus();
+      }
+    };
+    const focusOption = (offset) => {
+      const items = options();
+      const current = items.indexOf(document.activeElement);
+      const next = current < 0 ? 0 : (current + offset + items.length) % items.length;
+      items[next]?.focus();
+    };
+
+    toggle.addEventListener('click', () => {
+      if (menu.classList.contains('hidden')) openMenu(false);
+      else closeMenu();
+    });
+
+    toggle.addEventListener('keydown', (event) => {
+      if (['Enter', ' ', 'ArrowDown'].includes(event.key)) {
+        event.preventDefault();
+        openMenu(true);
+      } else if (event.key === 'Escape') {
+        closeMenu();
+      }
+    });
+
+    options().forEach(option => {
+      option.addEventListener('click', () => {
+        messageTTL = Number(option.dataset.ttl) || 0;
+        syncTtlSelector();
+        syncSessionBannerTTL();
+        closeMenu();
+        showToast(messageTTL > 0 ? `Messages self-destruct in ${option.textContent}` : 'Self-destruct disabled for new messages', messageTTL > 0 ? 'info' : 'warning');
+      });
+    });
+
+    menu.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeMenu(true);
+      } else if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        focusOption(1);
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        focusOption(-1);
+      } else if (event.key === 'Home') {
+        event.preventDefault();
+        options()[0]?.focus();
+      } else if (event.key === 'End') {
+        event.preventDefault();
+        options().at(-1)?.focus();
+      } else if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        document.activeElement?.click();
+      }
+    });
+
+    document.addEventListener('click', (event) => {
+      if (!selector.contains(event.target)) closeMenu();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !menu.classList.contains('hidden')) closeMenu(true);
+    });
+    syncTtlSelector();
+  }
+
+  function syncTtlSelector() {
+    const label = $('#ttl-label');
+    const menu = $('#ttl-menu');
+    if (!label || !menu) return;
+    label.textContent = formatTTL(messageTTL);
+    menu.querySelectorAll('.ttl-option').forEach(option => {
+      const active = Number(option.dataset.ttl) === Number(messageTTL);
+      option.classList.toggle('active', active);
+      option.setAttribute('aria-checked', String(active));
+    });
+  }
+
+  function syncSessionBannerTTL() {
+    $$('.ttl-tag').forEach(tag => {
+      tag.textContent = formatTTL(messageTTL);
+    });
+  }
+
   // ══════════════════════════════════════════════════════════
   //  GROUP HELPERS
   // ══════════════════════════════════════════════════════════
@@ -2130,7 +2856,38 @@ const BitMaskApp = (() => {
   }
 
   function updateMemberCount(count) {
-    $('#member-count').textContent = count;
+    const safeCount = Number(count) || 0;
+    $('#member-count').textContent = safeCount;
+    const detailsCount = $('#room-details-member-count');
+    if (detailsCount) detailsCount.textContent = safeCount;
+  }
+
+  function updateRoomControlsUI() {
+    const code = $('#room-details-code');
+    const host = $('#room-details-host');
+    const closeButton = $('#room-close-btn');
+    const status = $('#room-controls-status');
+    if (!code || !host || !closeButton || !status) return;
+
+    code.textContent = roomCode || '------';
+    host.textContent = roomHostPeerId
+      ? `Host: ${roomHostPeerId === peerId ? 'you' : formatPeerId(roomHostPeerId)}`
+      : 'Host: ----';
+    closeButton.classList.toggle('hidden', !isHost || !isGroupChat);
+    status.textContent = isHost
+      ? 'You are the host. You can remove members or close this room for everyone.'
+      : 'You can copy the room link or leave this room at any time.';
+  }
+
+  function leaveCurrentRoom() {
+    if (!currentRoomId) return;
+    BitMaskSocket.leaveRoom(currentRoomId);
+    closeModal('members-modal');
+    closeModal('room-controls-modal');
+    destroyAllMessages();
+    switchToLanding();
+    resetChatState();
+    showToast('You left the room.', 'info');
   }
 
   function updateTypingIndicator() {
@@ -2154,6 +2911,7 @@ const BitMaskApp = (() => {
 
   function renderMembersList() {
     const list = $('#members-list');
+    if (!list) return;
     list.innerHTML = '';
 
     for (const [pid] of groupMembers) {
@@ -2178,11 +2936,7 @@ const BitMaskApp = (() => {
       role.className = 'member-role';
       const roles = [];
       if (pid === peerId) roles.push('<span class="member-badge-you">you</span>');
-      if (isHost && pid === peerId) roles.push('<span class="member-badge-host">host</span>');
-      else if (!isHost && groupMembers.size > 0) {
-        // We don't always know who the host is on the client after join,
-        // but we know our own status
-      }
+      if (pid === roomHostPeerId) roles.push('<span class="member-badge-host">host</span>');
       role.innerHTML = roles.join(' · ') || 'member';
 
       details.appendChild(peerIdEl);
@@ -2190,6 +2944,29 @@ const BitMaskApp = (() => {
 
       item.appendChild(avatar);
       item.appendChild(details);
+      if (isHost && pid !== peerId) {
+        const removeButton = document.createElement('button');
+        removeButton.type = 'button';
+        removeButton.className = 'member-remove-btn';
+        removeButton.textContent = 'Remove';
+        removeButton.setAttribute('aria-label', `Remove peer ${formatPeerId(pid)} from the room`);
+        removeButton.addEventListener('click', async () => {
+          if (!confirm(`Remove ${formatPeerId(pid)} from this room?`)) return;
+          removeButton.disabled = true;
+          try {
+            await BitMaskSocket.removeRoomMember(currentRoomId, pid);
+            groupMembers.delete(pid);
+            updateMemberCount(groupMembers.size);
+            renderMembersList();
+            updateRoomControlsUI();
+            showToast('Member removed from the room.', 'success');
+          } catch (err) {
+            removeButton.disabled = false;
+            showToast(`Could not remove member: ${err.message}`, 'error');
+          }
+        });
+        item.appendChild(removeButton);
+      }
       list.appendChild(item);
     }
   }
@@ -2200,6 +2977,11 @@ const BitMaskApp = (() => {
 
   function checkUrlHash() {
     const hash = window.location.hash;
+    if (hash.startsWith('#invite=')) {
+      const payload = decodeURIComponent(hash.slice('#invite='.length));
+      handleScannedValue(payload);
+      return;
+    }
     if (hash.startsWith('#room=')) {
       const code = hash.replace('#room=', '').trim();
       if (code && code.length === 6) {

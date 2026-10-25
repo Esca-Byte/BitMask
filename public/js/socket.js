@@ -6,9 +6,13 @@ const BitMaskSocket = (() => {
   let socket = null;
   let handlers = {};
   let registeredPeerId = null;
+  let manuallyDisconnected = false;
+  let hasConnectedBefore = false;
 
   function connect() {
     if (socket?.connected || socket?.active) return;
+
+    manuallyDisconnected = false;
 
     const serverUrl = window.BitMaskConfig?.serverUrl || (
       window.BitMaskConfig?.isNative ? '' : window.location.origin
@@ -18,17 +22,38 @@ const BitMaskSocket = (() => {
       return;
     }
 
-    socket = io(serverUrl, { transports: ['websocket', 'polling'] });
+    socket = io(serverUrl, {
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 10000,
+      randomizationFactor: 0.25,
+    });
+
+    socket.io.on('reconnect_attempt', (attempt) => {
+      handlers.onReconnecting?.(attempt);
+    });
+
+    socket.io.on('reconnect_error', (err) => {
+      handlers.onReconnectError?.(err?.message || 'Reconnect attempt failed.');
+    });
+
+    socket.io.on('reconnect_failed', () => {
+      handlers.onReconnectFailed?.();
+    });
 
     socket.on('connect', () => {
       console.log('[BitMask] Connected to server');
-      handlers.onConnect?.();
+      const reconnected = hasConnectedBefore;
+      hasConnectedBefore = true;
+      handlers.onConnect?.({ reconnected });
     });
 
     socket.on('disconnect', (reason) => {
       console.log('[BitMask] Disconnected:', reason);
       registeredPeerId = null;
-      handlers.onDisconnect?.(reason);
+      if (!manuallyDisconnected) handlers.onDisconnect?.(reason);
     });
 
     socket.on('message', (msg) => {
@@ -60,6 +85,14 @@ const BitMaskSocket = (() => {
       handlers.onHostChanged?.(data);
     });
 
+    socket.on('room-closed', (data) => {
+      handlers.onRoomClosed?.(data);
+    });
+
+    socket.on('room-member-removed', (data) => {
+      handlers.onRoomMemberRemoved?.(data);
+    });
+
     socket.on('typing', (data) => {
       handlers.onTyping?.(data);
     });
@@ -78,6 +111,10 @@ const BitMaskSocket = (() => {
 
     socket.on('file-complete', (data) => {
       handlers.onFileComplete?.(data);
+    });
+
+    socket.on('file-cancelled', (data) => {
+      handlers.onFileCancelled?.(data);
     });
 
     socket.on('call-signal', (data) => {
@@ -124,9 +161,9 @@ const BitMaskSocket = (() => {
     });
   }
 
-  function connectToPeer(targetPeerId) {
+  function connectToPeer(targetPeerId, inviteToken = null) {
     return waitForReady().then(() => new Promise((resolve, reject) => {
-      socket.emit('connect-to-peer', { targetPeerId }, (res) => {
+      socket.emit('connect-to-peer', { targetPeerId, inviteToken }, (res) => {
         if (res?.error) reject(new Error(res.error));
         else resolve(res);
       });
@@ -142,9 +179,31 @@ const BitMaskSocket = (() => {
     }));
   }
 
-  function joinRoom(roomCode) {
+  function createInvite(kind = 'peer', options = {}) {
     return waitForReady().then(() => new Promise((resolve, reject) => {
-      socket.emit('join-room', { roomCode }, (res) => {
+      socket.emit('create-invite', {
+        kind,
+        roomId: options.roomId || null,
+        ttlMs: options.ttlMs,
+      }, (res) => {
+        if (res?.error) reject(new Error(res.error));
+        else resolve(res);
+      });
+    }));
+  }
+
+  function redeemInvite(token) {
+    return waitForReady().then(() => new Promise((resolve, reject) => {
+      socket.emit('redeem-invite', { token }, (res) => {
+        if (res?.error) reject(new Error(res.error));
+        else resolve(res);
+      });
+    }));
+  }
+
+  function joinRoom(roomCode, inviteToken = null) {
+    return waitForReady().then(() => new Promise((resolve, reject) => {
+      socket.emit('join-room', { roomCode, inviteToken }, (res) => {
         if (res?.error) reject(new Error(res.error));
         else resolve(res);
       });
@@ -179,13 +238,44 @@ const BitMaskSocket = (() => {
     if (socket) socket.emit('leave-room', { roomId });
   }
 
+  function closeRoom(roomId) {
+    return new Promise((resolve, reject) => {
+      if (!socket) return reject(new Error('Not connected'));
+      socket.emit('close-room', { roomId }, (res) => {
+        if (res?.error) reject(new Error(res.error));
+        else resolve(res);
+      });
+    });
+  }
+
+  function removeRoomMember(roomId, targetPeerId) {
+    return new Promise((resolve, reject) => {
+      if (!socket) return reject(new Error('Not connected'));
+      socket.emit('remove-room-member', { roomId, targetPeerId }, (res) => {
+        if (res?.error) reject(new Error(res.error));
+        else resolve(res);
+      });
+    });
+  }
+
   function disconnect() {
     if (!socket) return;
+    manuallyDisconnected = true;
     socket.removeAllListeners();
     socket.disconnect();
     socket = null;
     registeredPeerId = null;
+    hasConnectedBefore = false;
     handlers = {};
+  }
+
+  function reconnect() {
+    manuallyDisconnected = false;
+    if (!socket) {
+      connect();
+      return;
+    }
+    socket.connect();
   }
 
   function ackMessage(msgId) {
@@ -232,6 +322,16 @@ const BitMaskSocket = (() => {
     });
   }
 
+  function cancelFile(roomId, msgId) {
+    return new Promise((resolve, reject) => {
+      if (!socket) return reject(new Error('Not connected'));
+      socket.emit('send-file-cancel', { roomId, msgId }, (res) => {
+        if (res?.error) reject(new Error(res.error));
+        else resolve(res);
+      });
+    });
+  }
+
   function measureLatency() {
     return new Promise((resolve, reject) => {
       if (!socket?.connected) return reject(new Error('Not connected'));
@@ -262,6 +362,8 @@ const BitMaskSocket = (() => {
     register,
     connectToPeer,
     createRoom,
+    createInvite,
+    redeemInvite,
     joinRoom,
     distributeKey,
     sendMessage,
@@ -269,10 +371,14 @@ const BitMaskSocket = (() => {
     startFile,
     sendFileChunk,
     completeFile,
+    cancelFile,
     sendTyping,
     sendCallSignal,
     leaveRoom,
+    closeRoom,
+    removeRoomMember,
     disconnect,
+    reconnect,
     ackMessage,
     on,
     isConnected,

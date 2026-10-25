@@ -5,7 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>BitMask — Private conversations, without the trail</title>
   <meta name="description" content="BitMask is an end-to-end encrypted chat space with ephemeral messages, private identities, QR invites, and no accounts." />
-  <meta name="theme-color" content="#08111f" />
+  <meta name="theme-color" content="#1d1511" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="BitMask" />
   <meta property="og:title" content="BitMask — Private conversations, without the trail" />
   <meta property="og:description" content="End-to-end encrypted, ephemeral chat with no accounts and no message database." />
   <meta property="og:type" content="website" />
@@ -96,7 +100,10 @@
           </div>
             <span class="brand-name">BitMask</span>
           </div>
-          <div class="landing-header-status"><span class="eyebrow-dot"></span> Private by design</div>
+          <div class="landing-header-actions">
+            <div class="landing-header-status"><span class="eyebrow-dot"></span> Private by design</div>
+            <button id="install-app-btn" class="btn btn-ghost btn-sm hidden" type="button">Install app</button>
+          </div>
         </div>
         <div class="landing-hero-copy">
           <p class="landing-eyebrow">Anonymous · encrypted · ephemeral</p>
@@ -121,6 +128,7 @@
           <div class="status-row" aria-live="polite">
             <span id="status-dot" class="status-dot offline"></span>
             <span id="status-label" class="status-label">Connecting...</span>
+            <button id="retry-connection-btn" class="btn btn-ghost btn-xs hidden" type="button" aria-label="Retry server connection">Retry</button>
           </div>
           <div class="card-actions">
             <button id="sound-toggle-btn" class="btn btn-ghost btn-icon" title="Toggle sounds" aria-label="Toggle sounds">
@@ -322,10 +330,22 @@
         <div class="qr-label">YOUR PEER ID</div>
         <code id="qr-peer-id" class="qr-peer-text">----</code>
       </div>
-      <div class="qr-modal-actions">
-        <button id="qr-copy-btn" class="btn btn-primary qr-copy-btn" type="button">Copy peer ID</button>
+      <div class="qr-invite-controls">
+        <label class="field-label" for="qr-expiry-select">One-time invite expires</label>
+        <select id="qr-expiry-select" class="qr-expiry-select">
+          <option value="300000">5 minutes</option>
+          <option value="900000">15 minutes</option>
+          <option value="1800000">30 minutes</option>
+          <option value="3600000">1 hour</option>
+        </select>
+        <div id="qr-expiry-status" class="qr-expiry-status" role="status">Creating secure invite…</div>
       </div>
-      <p class="qr-hint"><span aria-hidden="true">▣</span> Keep this code visible while the other person scans.</p>
+      <div class="qr-modal-actions">
+        <button id="qr-copy-btn" class="btn btn-primary qr-copy-btn" type="button">Copy invite link</button>
+        <button id="qr-download-btn" class="btn btn-ghost" type="button">Download PNG</button>
+        <button id="qr-refresh-btn" class="btn btn-ghost" type="button">New QR</button>
+      </div>
+      <p class="qr-hint"><span aria-hidden="true">▣</span> This invite works once and expires automatically.</p>
     </div>
   </div>
 
@@ -420,6 +440,15 @@
           <code id="room-code-display">------</code>
           <button id="copy-room-code-modal-btn" class="btn btn-ghost room-code-copy-btn">Copy Code</button>
         </div>
+        <div class="room-invite-qr-card">
+          <div id="room-invite-qr-container" class="room-invite-qr-container" aria-label="One-time group room invite QR code"></div>
+          <div id="room-invite-expiry-status" class="qr-expiry-status" role="status">Creating one-time room invite…</div>
+        </div>
+        <div class="room-invite-actions">
+          <button id="copy-room-invite-btn" class="btn btn-primary" type="button">Copy invite link</button>
+          <button id="download-room-invite-btn" class="btn btn-ghost" type="button">Download PNG</button>
+          <button id="refresh-room-invite-btn" class="btn btn-ghost" type="button">New QR</button>
+        </div>
         <p class="room-created-hint">Waiting for peers to join...</p>
         <button id="enter-room-btn" class="btn btn-accent">Enter Room</button>
       </div>
@@ -431,10 +460,71 @@
     <div class="modal-backdrop"></div>
     <div class="modal-content">
       <div class="modal-header">
+        <div>
+          <span class="modal-kicker">Encrypted room</span>
           <h3>Room Members</h3>
+        </div>
         <button class="modal-close-btn" type="button" aria-label="Close members dialog">&times;</button>
       </div>
       <div id="members-list" class="members-list"></div>
+    </div>
+  </div>
+
+  <!-- ── Room Controls Modal ───────────────────────────────── -->
+  <div id="room-controls-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content room-controls-modal-content" role="dialog" aria-modal="true" aria-labelledby="room-controls-title">
+      <div class="modal-header">
+        <div>
+          <span class="modal-kicker">Session details</span>
+          <h3 id="room-controls-title">Room controls</h3>
+        </div>
+        <button class="modal-close-btn" type="button" aria-label="Close room controls dialog">&times;</button>
+      </div>
+      <div class="room-details-grid">
+        <div class="room-detail-card">
+          <span class="room-detail-label">ROOM CODE</span>
+          <code id="room-details-code">------</code>
+          <button id="copy-room-details-btn" class="btn btn-ghost btn-sm" type="button">Copy room link</button>
+        </div>
+        <div class="room-detail-card">
+          <span class="room-detail-label">MEMBERS</span>
+          <strong id="room-details-member-count">1</strong>
+          <span id="room-details-host" class="room-detail-subtext">Host: ----</span>
+        </div>
+      </div>
+      <p id="room-controls-status" class="room-controls-status" role="status">Room controls are available while this session is active.</p>
+      <div class="room-controls-actions">
+        <button id="room-leave-btn" class="btn btn-ghost" type="button">Leave room</button>
+        <button id="room-close-btn" class="btn btn-danger hidden" type="button">Close room</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Peer Fingerprint Modal ────────────────────────────── -->
+  <div id="fingerprint-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content fingerprint-modal-content" role="dialog" aria-modal="true" aria-labelledby="fingerprint-modal-title">
+      <div class="modal-header">
+        <div>
+          <span class="modal-kicker">Identity verification</span>
+          <h3 id="fingerprint-modal-title">Verify this peer</h3>
+        </div>
+        <button class="modal-close-btn" type="button" aria-label="Close fingerprint dialog">&times;</button>
+      </div>
+      <p class="modal-desc">Compare this fingerprint with the other person through a trusted channel. Verification is stored only on this device.</p>
+      <div class="fingerprint-block">
+        <span class="fingerprint-label">PEER FINGERPRINT</span>
+        <code id="peer-fingerprint-value" class="fingerprint-value">Calculating…</code>
+        <button id="copy-peer-fingerprint-btn" class="btn btn-ghost btn-sm" type="button">Copy peer fingerprint</button>
+      </div>
+      <div class="fingerprint-block fingerprint-local-block">
+        <span class="fingerprint-label">YOUR FINGERPRINT</span>
+        <code id="local-fingerprint-value" class="fingerprint-value">Calculating…</code>
+        <button id="copy-local-fingerprint-btn" class="btn btn-ghost btn-sm" type="button">Copy your fingerprint</button>
+      </div>
+      <div id="fingerprint-verification-state" class="fingerprint-verification-state" role="status">Not verified on this device.</div>
+      <button id="mark-peer-verified-btn" class="btn btn-accent" type="button">Mark as verified</button>
     </div>
   </div>
 
@@ -444,33 +534,47 @@
     <!-- Chat Header -->
     <header class="chat-header">
       <div class="chat-header-left">
-        <button id="leave-btn" class="btn btn-ghost btn-icon" title="Leave chat" aria-label="Leave chat">
+        <button id="leave-btn" class="btn btn-ghost btn-icon chat-back-button" title="Leave chat" aria-label="Leave chat">
           <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
             <path d="M15 10H3m0 0l5-5M3 10l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
           </svg>
         </button>
-        <div class="chat-peer-info">
-          <!-- 1:1 mode -->
-          <span id="chat-direct-info">
-            <span class="chat-peer-label">Chatting with</span>
-            <code id="connected-peer-id">----</code>
-          </span>
-          <!-- Group mode -->
-          <span id="chat-group-info" class="hidden">
-            <span class="chat-peer-label">Group Room</span>
-            <code id="group-room-code" class="room-code-badge">------</code>
-            <button id="copy-room-code-btn" class="btn btn-ghost btn-icon btn-xs" title="Copy room code" aria-label="Copy room code">
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="4" y="1" width="7" height="7" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="1" y="4" width="7" height="7" rx="1" fill="var(--bg-primary)" stroke="currentColor" stroke-width="1.2"/></svg>
-            </button>
-          </span>
-        </div>
-        <div id="chat-session-status" class="chat-session-status" aria-live="polite">
-          <span class="chat-session-dot"></span>
-          <span id="chat-session-status-label">Secure session</span>
-        </div>
-        <div id="network-quality" class="network-quality" aria-live="polite" title="Connection quality">
-          <span class="network-bars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
-          <span id="network-quality-label">Checking</span>
+        <div class="chat-identity">
+          <div class="chat-peer-line">
+            <div class="chat-peer-info">
+              <!-- 1:1 mode -->
+              <div id="chat-direct-info" class="chat-context-info">
+                <span class="chat-peer-label">Secure peer</span>
+                <code id="connected-peer-id">----</code>
+                <button id="peer-verify-btn" class="peer-verify-pill" type="button" aria-label="View and verify this peer fingerprint">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M12 3 5 6v5c0 4.7 2.9 8.9 7 10 4.1-1.1 7-5.3 7-10V6l-7-3Z"/>
+                    <path d="m9 12 2 2 4-4"/>
+                  </svg>
+                  <span id="peer-verify-label">Verify</span>
+                </button>
+              </div>
+              <!-- Group mode -->
+              <div id="chat-group-info" class="chat-context-info hidden">
+                <span class="chat-peer-label">Encrypted room</span>
+                <code id="group-room-code" class="room-code-badge">------</code>
+                <button id="copy-room-code-btn" class="btn btn-ghost btn-icon btn-xs" title="Copy room link" aria-label="Copy room link">
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><rect x="4" y="1" width="7" height="7" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="1" y="4" width="7" height="7" rx="1" fill="var(--bg-primary)" stroke="currentColor" stroke-width="1.2"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="chat-session-chips">
+              <div id="chat-session-status" class="chat-session-status" aria-live="polite">
+                <span class="chat-session-dot" aria-hidden="true"></span>
+                <span id="chat-session-status-label">Secure session</span>
+                <button id="chat-retry-btn" class="btn btn-ghost btn-xs hidden" type="button" aria-label="Retry secure connection">Retry</button>
+              </div>
+              <div id="network-quality" class="network-quality" aria-live="polite" title="Connection quality">
+                <span class="network-bars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                <span id="network-quality-label">Checking</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
       <div class="chat-header-right">
@@ -484,46 +588,41 @@
           </svg>
           <span id="member-count">1</span>
         </button>
-        <!-- Voice & Video Call Buttons (Direct 1:1 only) -->
-        <button id="audio-call-btn" class="btn btn-ghost btn-icon hidden" title="Start voice call" aria-label="Start voice call">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
-          </svg>
-        </button>
-        <button id="video-call-btn" class="btn btn-ghost btn-icon hidden" title="Start video call" aria-label="Start video call">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M23 7l-7 5 7 5V7z"/>
-            <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
-          </svg>
-        </button>
-        <div class="encryption-badge">
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
-            <path d="M7 0C4.79 0 3 1.79 3 4v2H2a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1h-1V4c0-2.21-1.79-4-4-4zm2 6H5V4a2 2 0 1 1 4 0v2z"/>
-          </svg>
-          E2EE Active
+        <div class="chat-action-group" aria-label="Chat actions">
+          <!-- Voice & Video Call Buttons (Direct 1:1 only) -->
+          <button id="audio-call-btn" class="btn btn-ghost btn-icon hidden" title="Start voice call" aria-label="Start voice call">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+            </svg>
+          </button>
+          <button id="video-call-btn" class="btn btn-ghost btn-icon hidden" title="Start video call" aria-label="Start video call">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M23 7l-7 5 7 5V7z"/>
+              <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+            </svg>
+          </button>
+          <button id="chat-details-btn" class="btn btn-ghost btn-icon" title="View session details" aria-label="View session details">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="9"/>
+              <path d="M12 10v6M12 7h.01"/>
+            </svg>
+          </button>
+          <div class="encryption-badge" aria-label="End-to-end encryption active">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
+              <path d="M7 0C4.79 0 3 1.79 3 4v2H2a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1h-1V4c0-2.21-1.79-4-4-4zm2 6H5V4a2 2 0 1 1 4 0v2z"/>
+            </svg>
+            <span>E2EE</span>
+          </div>
+          <button id="panic-btn" class="btn btn-ghost btn-icon btn-panic" title="Panic Wipe (Alt+Shift+X)" aria-label="Emergency wipe">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/>
+              <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+          </button>
         </div>
-        <button id="panic-btn" class="btn btn-ghost btn-icon btn-panic" title="Panic Wipe (Alt+Shift+X)" aria-label="Emergency wipe">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-            <line x1="12" y1="9" x2="12" y2="13"/>
-            <line x1="12" y1="17" x2="12.01" y2="17"/>
-          </svg>
-        </button>
       </div>
     </header>
-
-    <!-- TTL Selector -->
-    <div class="ttl-bar">
-      <span class="ttl-label">Self-destruct:</span>
-      <div class="ttl-options">
-        <button class="ttl-option" data-ttl="5000">5s</button>
-        <button class="ttl-option active" data-ttl="30000">30s</button>
-        <button class="ttl-option" data-ttl="60000">1m</button>
-        <button class="ttl-option" data-ttl="300000">5m</button>
-        <button class="ttl-option" data-ttl="3600000">1h</button>
-        <button class="ttl-option" data-ttl="86400000">24h</button>
-      </div>
-    </div>
 
     <!-- Messages -->
     <div id="messages-container" class="messages-container"></div>
@@ -545,33 +644,58 @@
         </div>
         <button id="cancel-reply-btn" type="button" class="btn btn-ghost btn-icon btn-xs" title="Cancel reply" aria-label="Cancel reply">&times;</button>
       </div>
-      <button type="button" id="file-attach-btn" class="btn btn-ghost btn-icon" title="Send file (max 25MB)" aria-label="Attach a file">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
-        </svg>
-      </button>
-      <button type="button" id="view-once-btn" class="btn btn-ghost btn-icon" title="Toggle View Once Mode" aria-label="Toggle view once mode">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-          <circle cx="12" cy="12" r="3"/>
-        </svg>
-      </button>
-      <input type="file" id="file-input" accept="image/*,video/*,audio/*,.pdf,.txt,.zip,.json" hidden />
-      <textarea
-        id="message-input"
-        placeholder="Write a message…  (Enter to send)"
-        autocomplete="off"
-        spellcheck="false"
-        maxlength="5000"
-        rows="1"
-        aria-label="Message"
-      ></textarea>
-      <button type="submit" class="btn btn-send" title="Send" aria-label="Send message">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="22" y1="2" x2="11" y2="13"/>
-          <polygon points="22 2 15 22 11 13 2 9 22 2"/>
-        </svg>
-      </button>
+      <div class="composer-row">
+        <div class="composer-accessories" aria-label="Message options">
+          <button type="button" id="file-attach-btn" class="btn btn-ghost btn-icon composer-tool" title="Send file (max 25MB)" aria-label="Attach a file">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+            </svg>
+          </button>
+          <div id="ttl-selector" class="ttl-selector">
+            <button id="ttl-toggle-btn" type="button" class="btn btn-ghost ttl-toggle-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="ttl-menu" title="Choose self-destruct interval">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="9"/>
+                <path d="M12 7v5l3 2"/>
+              </svg>
+              <span id="ttl-label">30s</span>
+              <svg class="ttl-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
+            <div id="ttl-menu" class="ttl-menu hidden" role="menu" aria-label="Self-destruct interval">
+              <button class="ttl-option" type="button" role="menuitemradio" aria-checked="false" data-ttl="0">Off</button>
+              <button class="ttl-option" type="button" role="menuitemradio" aria-checked="false" data-ttl="5000">5s</button>
+              <button class="ttl-option active" type="button" role="menuitemradio" aria-checked="true" data-ttl="30000">30s</button>
+              <button class="ttl-option" type="button" role="menuitemradio" aria-checked="false" data-ttl="60000">1m</button>
+              <button class="ttl-option" type="button" role="menuitemradio" aria-checked="false" data-ttl="300000">5m</button>
+              <button class="ttl-option" type="button" role="menuitemradio" aria-checked="false" data-ttl="3600000">1h</button>
+              <button class="ttl-option" type="button" role="menuitemradio" aria-checked="false" data-ttl="86400000">24h</button>
+            </div>
+          </div>
+          <button type="button" id="view-once-btn" class="btn btn-ghost btn-icon composer-tool" title="Toggle View Once Mode" aria-label="Toggle view once mode" aria-pressed="false">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+          </button>
+        </div>
+        <input type="file" id="file-input" accept="image/*,video/*,audio/*,.pdf,.txt,.zip,.json" hidden />
+        <div class="message-input-shell">
+          <textarea
+            id="message-input"
+            placeholder="Write a message…"
+            autocomplete="off"
+            spellcheck="false"
+            maxlength="5000"
+            rows="1"
+            aria-label="Message"
+          ></textarea>
+        </div>
+        <button type="submit" class="btn btn-send" title="Send message" aria-label="Send message">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="22" y1="2" x2="11" y2="13"/>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+          </svg>
+        </button>
+      </div>
     </form>
   </div>
 
@@ -602,6 +726,16 @@
           <span class="call-badge">E2EE CALL ACTIVE</span>
           <code id="call-peer-name">----</code>
         </div>
+        <button id="call-diagnostics-btn" class="btn btn-ghost btn-sm call-diagnostics-toggle" type="button" aria-expanded="false" aria-controls="call-diagnostics">
+          Diagnostics
+        </button>
+      </div>
+      <div id="call-diagnostics" class="call-diagnostics hidden" role="region" aria-label="Call diagnostics">
+        <div class="call-diagnostic-stat"><span>Connection</span><strong id="call-diagnostics-state">Connecting</strong></div>
+        <div class="call-diagnostic-stat"><span>Latency</span><strong id="call-diagnostics-latency">—</strong></div>
+        <div class="call-diagnostic-stat"><span>Packet loss</span><strong id="call-diagnostics-loss">—</strong></div>
+        <div class="call-diagnostic-stat"><span>Bitrate</span><strong id="call-diagnostics-bitrate">—</strong></div>
+        <div class="call-diagnostic-stat"><span>Duration</span><strong id="call-diagnostics-duration">00:00</strong></div>
       </div>
       
       <!-- Video streams view -->

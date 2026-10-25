@@ -43,6 +43,22 @@ const BitMaskCrypto = (() => {
     );
   }
 
+  /**
+   * Create a stable, human-comparable fingerprint for a public key.
+   * The fingerprint is derived from the raw P-256 public key bytes and
+   * never from the display Peer ID.
+   */
+  async function fingerprintPublicKey(base64Key) {
+    if (typeof base64Key !== 'string' || !base64Key) {
+      throw new Error('Public key required for fingerprinting.');
+    }
+    const digest = await crypto.subtle.digest('SHA-256', base64ToBuffer(base64Key));
+    return Array.from(new Uint8Array(digest))
+      .map(byte => byte.toString(16).padStart(2, '0'))
+      .join('')
+      .toUpperCase();
+  }
+
   // ── Key Derivation ─────────────────────────────────────────
 
   /**
@@ -174,12 +190,17 @@ const BitMaskCrypto = (() => {
    * Encrypt a file as independently authenticated chunks. Each chunk gets a
    * fresh nonce, so large media never has to cross the Socket.io frame limit.
    */
-  async function encryptFileChunks(sharedKey, fileBuffer, chunkSize = 512 * 1024, onProgress) {
+  async function encryptFileChunks(sharedKey, fileBuffer, chunkSize = 512 * 1024, onProgress, signal) {
     const source = new Uint8Array(fileBuffer);
     const chunks = [];
     const total = Math.max(1, Math.ceil(source.byteLength / chunkSize));
 
     for (let offset = 0, index = 0; offset < source.byteLength || (source.byteLength === 0 && index === 0); offset += chunkSize, index++) {
+      if (signal?.aborted) {
+        const error = new Error('File transfer cancelled.');
+        error.name = 'AbortError';
+        throw error;
+      }
       const chunk = source.slice(offset, Math.min(offset + chunkSize, source.byteLength));
       const encrypted = await encryptFile(sharedKey, chunk.buffer);
       chunks.push(encrypted);
@@ -235,6 +256,7 @@ const BitMaskCrypto = (() => {
     generateKeyPair,
     exportPublicKey,
     importPublicKey,
+    fingerprintPublicKey,
     deriveSharedKey,
     encrypt,
     decrypt,

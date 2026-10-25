@@ -1,5 +1,5 @@
 // BitMask Service Worker
-const CACHE_NAME = 'bitmask-v9';
+const CACHE_NAME = 'bitmask-v14';
 const ASSETS = [
   '/',
   '/index.html',
@@ -40,6 +40,9 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   if (e.request.url.includes('/socket.io/')) return; // Skip socket signaling
   e.respondWith(
-    caches.match(e.request).then((res) => res || fetch(e.request))
+    caches.match(e.request).then((res) => res || fetch(e.request)).catch(() => {
+      if (e.request.mode === 'navigate') return caches.match('/index.html');
+      return Response.error();
+    })
   );
 });

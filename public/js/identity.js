@@ -10,6 +10,7 @@ const BitMaskIdentity = (() => {
   const STORAGE_KEY_PUB = 'bitmask_publicKeyBase64';
   const STORAGE_KEY_MODE = 'bitmask_storageMode'; // 'session' | 'persistent'
   const STORAGE_KEY_LOCKED = 'bitmask_lockedIdentity'; // passphrase-encrypted blob
+  const STORAGE_KEY_VERIFIED = 'bitmask_verifiedPeers';
   const PBKDF2_ITERATIONS = 310000;
 
   // ── Storage Mode ───────────────────────────────────────────
@@ -79,6 +80,47 @@ const BitMaskIdentity = (() => {
       store.removeItem(STORAGE_KEY_KEYS);
       store.removeItem(STORAGE_KEY_PUB);
     });
+    localStorage.removeItem(STORAGE_KEY_VERIFIED);
+  }
+
+  // ── Local Peer Verification ────────────────────────────────
+
+  function readVerifiedPeers() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY_VERIFIED) || '{}');
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function getVerifiedPeer(peerId, fingerprint, ownFingerprint) {
+    if (!peerId || !fingerprint) return null;
+    const entry = readVerifiedPeers()[peerId];
+    if (!entry || entry.fingerprint !== fingerprint) return null;
+    if (ownFingerprint && entry.ownFingerprint !== ownFingerprint) return null;
+    return entry;
+  }
+
+  function setVerifiedPeer(peerId, fingerprint, ownFingerprint) {
+    if (!peerId || !fingerprint || !ownFingerprint) {
+      throw new Error('Peer verification data is incomplete.');
+    }
+    const peers = readVerifiedPeers();
+    peers[peerId] = {
+      fingerprint,
+      ownFingerprint,
+      verifiedAt: new Date().toISOString(),
+    };
+    localStorage.setItem(STORAGE_KEY_VERIFIED, JSON.stringify(peers));
+    return peers[peerId];
+  }
+
+  function clearVerifiedPeer(peerId) {
+    if (!peerId) return;
+    const peers = readVerifiedPeers();
+    delete peers[peerId];
+    localStorage.setItem(STORAGE_KEY_VERIFIED, JSON.stringify(peers));
   }
 
   // ── Remember Me (move between storages) ────────────────────
@@ -305,5 +347,8 @@ const BitMaskIdentity = (() => {
     removeLock,
     downloadBlob,
     getStorageMode,
+    getVerifiedPeer,
+    setVerifiedPeer,
+    clearVerifiedPeer,
   };
 })();
