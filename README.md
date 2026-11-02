@@ -1,4 +1,8 @@
 <p align="center">
+  <img src="public/brand/bitmasklogo.png" alt="BitMask official logo" width="220" />
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/badge/Node.js-18+-339933?style=flat-square&logo=node.js&logoColor=white" />
   <img src="https://img.shields.io/badge/Socket.io-4.7-010101?style=flat-square&logo=socket.io&logoColor=white" />
   <img src="https://img.shields.io/badge/E2EE-AES--256--GCM-6C63FF?style=flat-square" />
@@ -29,6 +33,9 @@
 | **Real-Time** | WebSocket-powered via Socket.io with typing indicators, connection quality, and instant delivery. |
 | **Ephemeral Actions** | Encrypted replies and short-lived reactions disappear with the message session. |
 | **QR Scanner** | Scan a peer ID or room invite with a mobile camera, or choose a QR image from the device. |
+| **One-Time Invites** | Share expiring, single-use peer and group-room invite links or QR codes. |
+| **Installable App** | Use BitMask as a Progressive Web App on supported browsers, with mobile install guidance. |
+| **Responsive Mobile UI** | Touch-friendly spacing, safe-area support, and layouts designed for phones. |
 
 ## Screenshots
 
@@ -128,6 +135,8 @@ BitMask/
 ├── .gitignore
 └── public/
     ├── index.html             # Single-page app (landing + chat + modals)
+    ├── brand/bitmasklogo.png  # Official BitMask logo artwork
+    ├── icons/                 # PWA, Apple, and Android-compatible app icons
     ├── privacy.html           # Privacy Policy
     ├── terms.html             # Terms of Service
     ├── css/

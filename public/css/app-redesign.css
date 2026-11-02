@@ -1400,6 +1400,29 @@ input[type='password']:focus,
   --qr-guide: var(--ui-accent-strong);
 }
 
+/* Official BitMask brand mark. The source artwork is transparent, so it
+   remains crisp on the warm surfaces used by the landing and unlock views. */
+.logo-icon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  place-items: center;
+}
+
+.brand-logo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.unlock-wrapper .logo-icon {
+  width: 48px;
+  height: 48px;
+  flex-basis: 48px;
+}
+
 /* Final responsive pass: predictable gutters, touch-safe controls, and
    enough breathing room for narrow phone viewports. */
 :root {

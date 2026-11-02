@@ -1,5 +1,5 @@
 // BitMask Service Worker
-const CACHE_NAME = 'bitmask-v15';
+const CACHE_NAME = 'bitmask-v16';
 const ASSETS = [
   '/',
   '/index.html',
@@ -16,6 +16,7 @@ const ASSETS = [
   '/js/panic.js',
   '/js/app.js',
   '/manifest.json',
+  '/brand/bitmasklogo.png',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
   '/icons/maskable-512.png',
