@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>BitMask — Private conversations, without the trail</title>
   <meta name="description" content="BitMask is an end-to-end encrypted chat space with ephemeral messages, private identities, QR invites, and no accounts." />
   <meta name="theme-color" content="#1d1511" />
@@ -19,6 +19,7 @@
   <link rel="stylesheet" href="/css/style.css" />
   <link rel="stylesheet" href="/css/app-redesign.css" />
   <link rel="manifest" href="/manifest.json" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='24' fill='%236F4E37'/%3E%3Ccircle cx='34' cy='44' r='8' fill='%23B5EAE2'/%3E%3Ccircle cx='66' cy='44' r='8' fill='%23B5EAE2'/%3E%3Cpath d='M25 63c15 14 35 14 50 0' fill='none' stroke='%23E8E0FD' stroke-width='7' stroke-linecap='round'/%3E%3C/svg%3E" />
 </head>
 <body>
@@ -312,6 +313,24 @@
       </footer>
     </div>
   </section>
+
+  <!-- ── Install Help Modal ─────────────────────────────────── -->
+  <div id="install-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content install-modal-content" role="dialog" aria-modal="true" aria-labelledby="install-modal-title">
+      <div class="modal-header">
+        <div>
+          <span class="modal-kicker">BitMask app</span>
+          <h3 id="install-modal-title">Install BitMask</h3>
+        </div>
+        <button class="modal-close-btn" type="button" aria-label="Close install instructions">&times;</button>
+      </div>
+      <p id="install-modal-description" class="modal-desc">Install BitMask for a faster, app-like experience.</p>
+      <ol id="install-steps" class="install-steps"></ol>
+      <p id="install-modal-note" class="install-modal-note"></p>
+      <button class="btn btn-accent install-modal-dismiss" type="button">Got it</button>
+    </div>
+  </div>
 
   <!-- ── QR Modal ─────────────────────────────────────────── -->
   <div id="qr-modal" class="modal hidden">

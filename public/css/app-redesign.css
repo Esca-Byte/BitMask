@@ -1400,6 +1400,480 @@ input[type='password']:focus,
   --qr-guide: var(--ui-accent-strong);
 }
 
+/* Final responsive pass: predictable gutters, touch-safe controls, and
+   enough breathing room for narrow phone viewports. */
+:root {
+  --ui-page-gutter: clamp(14px, 4vw, 48px);
+  --ui-safe-top: env(safe-area-inset-top, 0px);
+  --ui-safe-right: env(safe-area-inset-right, 0px);
+  --ui-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --ui-safe-left: env(safe-area-inset-left, 0px);
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+#app-main,
+.view {
+  width: 100%;
+  min-height: 100dvh;
+}
+
+.landing-wrapper {
+  width: min(100%, 1240px);
+  padding-top: max(24px, var(--ui-safe-top));
+  padding-right: max(var(--ui-page-gutter), var(--ui-safe-right));
+  padding-bottom: max(34px, var(--ui-safe-bottom));
+  padding-left: max(var(--ui-page-gutter), var(--ui-safe-left));
+}
+
+.landing-header,
+.landing-header-row,
+.landing-header-actions,
+.card-header,
+.section-heading-row,
+.identity-card,
+.connect-section,
+.group-section,
+.feature,
+.modal-content {
+  min-width: 0;
+}
+
+.landing-header-row {
+  flex-wrap: wrap;
+}
+
+.landing-header-actions {
+  flex-wrap: wrap;
+}
+
+.landing-header-actions .btn-sm {
+  min-height: 40px;
+}
+
+input[type='text'],
+input[type='password'],
+select,
+textarea {
+  max-width: 100%;
+}
+
+.modal {
+  padding: max(12px, var(--ui-safe-top)) max(12px, var(--ui-safe-right)) max(12px, var(--ui-safe-bottom)) max(12px, var(--ui-safe-left));
+}
+
+.modal-content {
+  max-height: calc(100dvh - 24px - var(--ui-safe-top) - var(--ui-safe-bottom));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.qr-scanner-modal {
+  padding: 0;
+}
+
+.qr-scanner-modal-content {
+  max-height: none;
+  overflow: hidden;
+}
+
+.install-modal-content {
+  width: min(100%, 460px);
+}
+
+.install-steps {
+  display: grid;
+  gap: 10px;
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: install-step;
+}
+
+.install-steps li {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 11px;
+  min-height: 48px;
+  padding: 9px 11px;
+  border: 1px solid rgba(201, 139, 99, 0.22);
+  border-radius: 12px;
+  background: rgba(38, 26, 19, 0.6);
+  color: var(--ui-text-soft);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.install-step-number {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 9px;
+  background: rgba(201, 139, 99, 0.16);
+  color: var(--ui-accent-strong);
+  font-family: var(--ui-mono);
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.install-modal-note {
+  margin: 16px 0 0;
+  color: var(--ui-text-faint);
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+
+.install-modal-dismiss {
+  width: 100%;
+  margin-top: 18px;
+}
+
+.chat-header {
+  padding-top: max(11px, var(--ui-safe-top));
+  padding-right: max(var(--ui-page-gutter), var(--ui-safe-right));
+  padding-bottom: 11px;
+  padding-left: max(var(--ui-page-gutter), var(--ui-safe-left));
+}
+
+.chat-header-left,
+.chat-header-right,
+.chat-peer-line,
+.chat-context-info,
+.chat-session-chips,
+.chat-action-group {
+  min-width: 0;
+}
+
+.chat-header-right,
+.chat-action-group {
+  flex-wrap: wrap;
+}
+
+.chat-peer-line,
+.chat-context-info {
+  max-width: 100%;
+}
+
+.messages-container {
+  padding-right: max(14px, var(--ui-safe-right));
+  padding-bottom: calc(18px + var(--ui-safe-bottom));
+  padding-left: max(14px, var(--ui-safe-left));
+}
+
+.typing-indicator {
+  padding-right: max(14px, var(--ui-safe-right));
+  padding-left: max(14px, var(--ui-safe-left));
+}
+
+.chat-input-bar {
+  padding-right: max(12px, var(--ui-safe-right));
+  padding-bottom: max(12px, var(--ui-safe-bottom));
+  padding-left: max(12px, var(--ui-safe-left));
+}
+
+.composer-row,
+.composer-accessories,
+.message-input-shell {
+  min-width: 0;
+}
+
+.ttl-toggle-btn {
+  white-space: nowrap;
+}
+
+@media (max-width: 700px) {
+  .landing-wrapper {
+    gap: 20px;
+    padding-top: max(20px, var(--ui-safe-top));
+    padding-right: max(14px, var(--ui-safe-right));
+    padding-bottom: max(32px, var(--ui-safe-bottom));
+    padding-left: max(14px, var(--ui-safe-left));
+  }
+
+  .landing-header {
+    padding: 0 0 10px;
+  }
+
+  .landing-header-row {
+    align-items: center;
+    gap: 12px;
+  }
+
+  .landing-header-actions {
+    flex: 1 1 auto;
+    align-items: center;
+    justify-content: flex-end;
+    flex-direction: row;
+    gap: 8px;
+  }
+
+  .landing-header-status {
+    max-width: none;
+    overflow: visible;
+    white-space: nowrap;
+  }
+
+  .landing-header h1 {
+    max-width: 11ch;
+    font-size: clamp(2.2rem, 12vw, 4.2rem);
+    line-height: 1.02;
+  }
+
+  .landing-intro {
+    margin-top: 16px;
+    line-height: 1.6;
+  }
+
+  .landing-proof {
+    margin-top: 22px;
+    padding-top: 16px;
+  }
+
+  .identity-card,
+  .connect-section,
+  .group-section {
+    gap: 22px;
+    padding: 20px 16px;
+  }
+
+  .card-header,
+  .section-heading-row {
+    gap: 14px;
+  }
+
+  .identity-card .card-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .identity-card .card-heading {
+    grid-column: 1 / -1;
+  }
+
+  .identity-card .status-row {
+    grid-column: 1;
+    justify-self: start;
+  }
+
+  .identity-card .card-actions {
+    position: static;
+    grid-column: 2;
+    grid-row: 2;
+    align-self: center;
+    justify-self: end;
+  }
+
+  .peer-id-section {
+    margin-top: 0;
+  }
+
+  .identity-options {
+    gap: 16px;
+    padding-top: 20px;
+  }
+
+  .identity-buttons {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px;
+  }
+
+  .identity-buttons #lock-id-btn {
+    grid-column: 1 / -1;
+  }
+
+  .connect-input-group {
+    gap: 10px;
+  }
+
+  .connect-actions {
+    gap: 9px;
+  }
+
+  .group-actions {
+    gap: 16px;
+    margin-top: 20px;
+  }
+
+  .join-group-form .input-group {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .join-group-form .input-group .btn {
+    min-width: 76px;
+  }
+
+  .features {
+    gap: 14px;
+  }
+
+  .features-heading {
+    padding-top: 8px;
+  }
+
+  .feature {
+    padding: 20px;
+  }
+
+  .landing-footer {
+    gap: 14px;
+    padding-top: 20px;
+  }
+
+  .modal-content {
+    width: min(100%, 520px);
+    padding: 22px 18px;
+    border-radius: 20px;
+  }
+
+  .modal-content.peer-qr-modal-content {
+    width: min(100%, 480px);
+    padding: 22px 16px max(20px, var(--ui-safe-bottom));
+  }
+
+  .qr-card {
+    margin-top: 18px;
+  }
+
+  .chat-header {
+    gap: 12px;
+  }
+
+  .chat-header-left,
+  .chat-header-right {
+    width: 100%;
+  }
+
+  .chat-header-right {
+    justify-content: flex-end;
+  }
+
+  .chat-peer-line {
+    align-items: flex-start;
+  }
+
+  .chat-session-chips {
+    margin-left: auto;
+  }
+
+  .chat-action-group {
+    justify-content: flex-end;
+  }
+
+  .messages-container {
+    padding-top: 20px;
+  }
+
+  .message {
+    max-width: min(90%, 680px);
+  }
+
+  .chat-input-bar {
+    padding-top: 12px;
+  }
+
+  .composer-row {
+    gap: 7px;
+  }
+}
+
+@media (max-width: 480px) {
+  .landing-header-row {
+    align-items: flex-start;
+  }
+
+  .landing-header-actions {
+    flex-basis: 100%;
+    justify-content: space-between;
+  }
+
+  .landing-header-status {
+    padding: 7px 10px;
+  }
+
+  .landing-header-actions .btn-sm {
+    flex: 0 0 auto;
+  }
+
+  .section-heading-row .section-index {
+    justify-self: start;
+  }
+
+  .chat-peer-line,
+  .chat-context-info {
+    width: 100%;
+  }
+
+  .chat-session-chips {
+    margin-left: 0;
+  }
+
+  .chat-action-group {
+    width: 100%;
+  }
+
+  .composer-accessories {
+    gap: 4px;
+  }
+
+  .composer-tool,
+  .btn-send {
+    width: 42px;
+    min-width: 42px;
+  }
+
+  .ttl-toggle-btn {
+    padding-inline: 8px;
+  }
+}
+
+@media (max-width: 360px) {
+  .landing-wrapper {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .identity-card,
+  .connect-section,
+  .group-section {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .identity-card .card-actions {
+    gap: 4px;
+  }
+
+  .identity-card .card-actions .btn:not(.btn-icon) {
+    padding-inline: 9px;
+  }
+
+  .composer-row {
+    gap: 5px;
+  }
+
+  .composer-tool,
+  .btn-send {
+    width: 40px;
+    min-width: 40px;
+  }
+
+  .ttl-toggle-btn {
+    min-width: 62px;
+    padding-inline: 6px;
+    font-size: 0.62rem;
+  }
+}
+
 /* Chat interface polish: clean header hierarchy, compact bubbles, and a
    composer-owned self-destruct selector. */
 #chat-view {

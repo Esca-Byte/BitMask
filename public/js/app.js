@@ -61,6 +61,11 @@ const BitMaskApp = (() => {
   // ══════════════════════════════════════════════════════════
 
   async function init() {
+    // Register these before identity loading/network setup. Chromium can
+    // dispatch beforeinstallprompt very early in the page lifecycle.
+    setupInstallPrompt();
+    registerServiceWorker();
+
     // 1. Check if identity is locked with a passphrase
     if (BitMaskIdentity.isLocked()) {
       showUnlockView();
@@ -87,7 +92,6 @@ const BitMaskApp = (() => {
     syncRememberMeToggle();
 
     // 4. Set up event handlers
-    setupInstallPrompt();
     setupSocketHandlers();
     setupUIHandlers();
     setupModalHandlers();
@@ -98,7 +102,6 @@ const BitMaskApp = (() => {
 
     // Show landing
     showView('landing-view');
-    registerServiceWorker();
     setTimeout(checkUrlHash, 700);
   }
 
@@ -134,10 +137,19 @@ const BitMaskApp = (() => {
     if (window.__bitmaskInstallPromptReady) return;
     window.__bitmaskInstallPromptReady = true;
 
+    const installButton = $('#install-app-btn');
+    if (installButton && !installButton.dataset.installHandlerAttached) {
+      installButton.addEventListener('click', handleInstallClick);
+      installButton.dataset.installHandlerAttached = 'true';
+    }
+
+    syncInstallButton();
+
     window.addEventListener('beforeinstallprompt', (event) => {
+      if (isStandaloneDisplayMode() || window.BitMaskConfig?.isNative) return;
       event.preventDefault();
       deferredInstallPrompt = event;
-      $('#install-app-btn')?.classList.remove('hidden');
+      syncInstallButton();
     });
 
     window.addEventListener('appinstalled', () => {
@@ -145,6 +157,129 @@ const BitMaskApp = (() => {
       $('#install-app-btn')?.classList.add('hidden');
       showToast('BitMask installed. You can open it from your apps.', 'success');
     });
+
+    const displayModeQuery = window.matchMedia?.('(display-mode: standalone)');
+    displayModeQuery?.addEventListener?.('change', syncInstallButton);
+  }
+
+  function isStandaloneDisplayMode() {
+    return Boolean(
+      window.matchMedia?.('(display-mode: standalone)')?.matches ||
+      window.navigator.standalone === true ||
+      window.document.referrer.startsWith('android-app://')
+    );
+  }
+
+  function getInstallPlatform() {
+    const userAgent = navigator.userAgent || '';
+    const platform = navigator.platform || '';
+    const isIOS = /iphone|ipad|ipod/i.test(userAgent) ||
+      (platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    return {
+      isIOS,
+      isAndroid: /android/i.test(userAgent),
+    };
+  }
+
+  function syncInstallButton() {
+    const installButton = $('#install-app-btn');
+    if (!installButton) return;
+
+    if (isStandaloneDisplayMode() || window.BitMaskConfig?.isNative) {
+      installButton.classList.add('hidden');
+      return;
+    }
+
+    const { isIOS } = getInstallPlatform();
+    installButton.classList.remove('hidden');
+    installButton.textContent = isIOS ? 'Add to Home Screen' : 'Install app';
+    installButton.setAttribute('aria-label', isIOS
+      ? 'Add BitMask to your home screen'
+      : 'Install BitMask as an app');
+  }
+
+  async function handleInstallClick() {
+    if (deferredInstallPrompt) {
+      const installPrompt = deferredInstallPrompt;
+      deferredInstallPrompt = null;
+      try {
+        await installPrompt.prompt();
+        const result = await installPrompt.userChoice;
+        if (result.outcome === 'accepted') {
+          $('#install-app-btn')?.classList.add('hidden');
+        } else {
+          showToast('Installation was cancelled. You can try again anytime.', 'info');
+          syncInstallButton();
+        }
+      } catch (err) {
+        console.info('[BitMask] Install prompt unavailable:', err.message);
+        syncInstallButton();
+        showInstallHelp();
+      }
+      return;
+    }
+
+    showInstallHelp();
+  }
+
+  function showInstallHelp() {
+    const title = $('#install-modal-title');
+    const description = $('#install-modal-description');
+    const steps = $('#install-steps');
+    const note = $('#install-modal-note');
+    if (!title || !description || !steps || !note) return;
+
+    const { isIOS, isAndroid } = getInstallPlatform();
+    let heading = 'Install BitMask';
+    let copy = 'Add BitMask to your device for a faster, app-like experience.';
+    let instructions = [];
+    let noteText = '';
+
+    if (isIOS) {
+      heading = 'Add BitMask to Home Screen';
+      copy = 'Safari does not show an automatic install prompt. Use the Share menu to add BitMask manually.';
+      instructions = [
+        'Open this page in Safari.',
+        'Tap the Share button in the browser toolbar.',
+        'Choose “Add to Home Screen”, then tap Add.',
+      ];
+      noteText = 'Open BitMask from the new home-screen icon to use it as an app.';
+    } else if (isAndroid) {
+      heading = 'Install BitMask on Android';
+      copy = 'If the browser prompt is unavailable, install BitMask from the browser menu.';
+      instructions = [
+        'Open this page in Chrome over HTTPS.',
+        'Tap the browser menu ⋮ in the top-right corner.',
+        'Choose “Install app” or “Add to Home screen”, then confirm.',
+      ];
+      noteText = window.isSecureContext
+        ? 'The install option can take a few seconds to appear after the page loads.'
+        : 'PWA installation requires an HTTPS address. Open the deployed HTTPS URL first.';
+    } else {
+      copy = 'Use your browser’s install control to add BitMask to your desktop or phone.';
+      instructions = [
+        'Open this page over HTTPS.',
+        'Use the install icon in the address bar or the browser menu.',
+        'Confirm the installation when your browser asks.',
+      ];
+      noteText = 'On iPhone or iPad, open BitMask in Safari and use Share → Add to Home Screen.';
+    }
+
+    title.textContent = heading;
+    description.textContent = copy;
+    note.textContent = noteText;
+    steps.replaceChildren(...instructions.map((instruction, index) => {
+      const item = document.createElement('li');
+      const number = document.createElement('span');
+      const text = document.createElement('span');
+      number.className = 'install-step-number';
+      number.textContent = String(index + 1).padStart(2, '0');
+      text.textContent = instruction;
+      item.append(number, text);
+      return item;
+    }));
+
+    openModal('install-modal');
   }
 
   function updatePeerIdDisplay() {
@@ -191,14 +326,12 @@ const BitMaskApp = (() => {
         updatePeerIdDisplay();
         syncSoundToggle();
         syncRememberMeToggle();
-        setupInstallPrompt();
         setupSocketHandlers();
         setupUIHandlers();
         setupModalHandlers();
         setupFileHandlers();
         BitMaskSocket.connect();
         showView('landing-view');
-        registerServiceWorker();
         setTimeout(checkUrlHash, 700);
         showToast('Identity unlocked!', 'success');
         BitMaskSound.playConnect();
@@ -217,14 +350,12 @@ const BitMaskApp = (() => {
       updatePeerIdDisplay();
       syncSoundToggle();
       syncRememberMeToggle();
-      setupInstallPrompt();
       setupSocketHandlers();
       setupUIHandlers();
       setupModalHandlers();
       setupFileHandlers();
       BitMaskSocket.connect();
       showView('landing-view');
-      registerServiceWorker();
       setTimeout(checkUrlHash, 700);
       showToast('Started with a fresh identity.', 'info');
     });
@@ -663,16 +794,6 @@ const BitMaskApp = (() => {
     });
     $('#copy-local-fingerprint-btn').addEventListener('click', () => {
       copyText(localFingerprint, $('#copy-local-fingerprint-btn'), 'Copy your fingerprint');
-    });
-
-    $('#install-app-btn').addEventListener('click', async () => {
-      if (!deferredInstallPrompt) return;
-      deferredInstallPrompt.prompt();
-      const result = await deferredInstallPrompt.userChoice;
-      if (result.outcome === 'accepted') {
-        $('#install-app-btn').classList.add('hidden');
-      }
-      deferredInstallPrompt = null;
     });
 
     // ── Sound Toggle ──
@@ -1234,6 +1355,9 @@ const BitMaskApp = (() => {
         else if (modal?.id === 'qr-scanner-modal') closeQrScannerModal();
         else if (modal) closeModal(modal.id);
       });
+    });
+    $('#install-modal .install-modal-dismiss')?.addEventListener('click', () => {
+      closeModal('install-modal');
     });
 
     document.addEventListener('keydown', (event) => {
@@ -3004,8 +3128,11 @@ const BitMaskApp = (() => {
   }
 
   // ── Public API ─────────────────────────────────────────────
-  return { init };
+  return { init, initInstallSupport: setupInstallPrompt };
 })();
 
 // Boot up when DOM is ready
+// The script is loaded at the end of the document, so install events can be
+// captured immediately instead of waiting for async identity setup.
+BitMaskApp.initInstallSupport?.();
 document.addEventListener('DOMContentLoaded', BitMaskApp.init);
